@@ -1,0 +1,11 @@
+*__pycache__
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+std.log
+grafana/logs/*.log
+grafana/logs/*.log.*

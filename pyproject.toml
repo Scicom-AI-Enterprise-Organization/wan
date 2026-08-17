@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fastapi-loki-tempo"
+description = "FastAPI boilerplate for Loki and Tempo."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "huseinzol05", email = "husein.zol05@gmail.com" }]
+keywords = ["fastapi", "tempo", "loki", "grafana", "opentelemetry", "observability", "tracing"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Logging",
+    "Topic :: System :: Monitoring",
+]
+dynamic = ["version", "dependencies"]
+
+[project.urls]
+Homepage = "https://github.com/huseinzol05/fastapi-loki-tempo"
+Source = "https://github.com/huseinzol05/fastapi-loki-tempo"
+
+[project.optional-dependencies]
+# Deprecated upstream since OpenTelemetry 1.16; only for legacy Jaeger agents.
+jaeger = ["opentelemetry-exporter-jaeger-thrift"]
+httpx = ["opentelemetry-instrumentation-httpx"]
+requests = ["opentelemetry-instrumentation-requests"]
+example = ["uvicorn[standard]>=0.23", "httpx>=0.24", "opentelemetry-instrumentation-httpx"]
+dev = [
+    "pytest>=7.4",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.24",
+    "uvicorn[standard]>=0.23",
+    "opentelemetry-instrumentation-httpx",
+]
+
+[tool.setuptools.dynamic]
+version = { attr = "fastapi_loki_tempo.__version__" }
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+include = ["fastapi_loki_tempo*"]
+
+[tool.setuptools.package-data]
+# Ships the inline type hints to downstream type checkers (PEP 561).
+fastapi_loki_tempo = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

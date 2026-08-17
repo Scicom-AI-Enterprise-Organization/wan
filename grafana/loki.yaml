@@ -1,0 +1,63 @@
+# Loki 3.4 single binary, local filesystem backend.
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  # Required for the traceID/spanID/correlation_id that Alloy attaches as
+  # structured metadata instead of as high cardinality labels.
+  allow_structured_metadata: true
+  volume_enabled: true
+  retention_period: 24h
+  # Alloy replays a container's existing log buffer on first start; without this
+  # those lines are dropped as too old and the stack looks broken.
+  reject_old_samples: false
+  # The 4MB/s default is easy to hit while replaying a backlog on first start.
+  ingestion_rate_mb: 16
+  ingestion_burst_size_mb: 32
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+
+ruler:
+  storage:
+    local:
+      directory: /loki/rules
+  rule_path: /loki/rules-temp
+
+query_range:
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 100
+
+analytics:
+  reporting_enabled: false

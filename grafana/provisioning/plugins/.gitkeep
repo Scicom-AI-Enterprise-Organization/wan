@@ -1,0 +1,1 @@
+# Grafana reads this directory at boot; keeping it present avoids a startup error.

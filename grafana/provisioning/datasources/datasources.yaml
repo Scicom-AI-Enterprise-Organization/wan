@@ -1,0 +1,77 @@
+# NOTE: `$` is Grafana's provisioning variable marker, so every literal `$` used by
+# a Grafana interpolation (`${__value.raw}` etc.) has to be written as `$$`.
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      maxLines: 2000
+      # This is the Loki -> Tempo half of the correlation. `trace_message` is in
+      # every log line for exactly this reason.
+      derivedFields:
+        - name: TraceID
+          matcherRegex: "traceID=(\\w+)"
+          url: "$${__value.raw}"
+          urlDisplayLabel: "View trace"
+          datasourceUid: tempo
+        # Same link, driven by the structured metadata Alloy attaches, which keeps
+        # working even if the line format changes.
+        - name: TraceID (metadata)
+          matcherType: label
+          matcherRegex: traceID
+          url: "$${__value.raw}"
+          urlDisplayLabel: "View trace"
+          datasourceUid: tempo
+
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      # And the Tempo -> Loki half: jump from a span to the logs of that trace.
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-10m"
+        spanEndTimeShift: "10m"
+        filterByTraceID: false
+        filterBySpanID: false
+        customQuery: true
+        query: '{job="fastapi"} |= "$${__span.traceId}"'
+      tracesToMetrics:
+        datasourceUid: prometheus
+        spanStartTimeShift: "-10m"
+        spanEndTimeShift: "10m"
+        queries:
+          - name: "Span request rate"
+            query: 'sum(rate(traces_spanmetrics_calls_total{$$__tags}[$$__rate_interval]))'
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false
+      traceQuery:
+        timeShiftEnabled: true
+        spanStartTimeShift: "-10m"
+        spanEndTimeShift: "10m"
+      streamingEnabled:
+        search: true
+
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+      timeInterval: 10s
+      # Click an exemplar on a latency graph and land on the trace behind it.
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo

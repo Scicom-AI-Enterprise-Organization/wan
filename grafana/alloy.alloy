@@ -1,0 +1,128 @@
+// Grafana Alloy: ship JSON logs into Loki.
+//
+// Two sources feed the same pipeline:
+//   1. docker container stdout   -> the app when run via docker compose
+//   2. /host-logs/*.log          -> the app when run on the host with LOG_FILE set
+// Only one of them produces app logs at a time, so lines are never duplicated.
+
+logging {
+  level  = "warn"
+  format = "logfmt"
+}
+
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  // Scrape only this compose project. discovery.docker sees EVERY container on the
+  // host, so without this Alloy ships unrelated projects' logs into Loki and trips
+  // its ingestion rate limit. Must match `name:` in docker-compose.yaml.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "fastapi-loki-tempo"
+    action        = "keep"
+  }
+
+  // "/fastapi-loki-tempo-app-1" -> "fastapi-loki-tempo-app-1"
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/?(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "compose_service"
+  }
+
+  // Only the app carries logs.job=fastapi, so `{job="fastapi"}` selects app logs.
+  rule {
+    source_labels = ["__meta_docker_container_label_logs_job"]
+    target_label  = "job"
+  }
+}
+
+loki.source.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.containers.output
+  labels           = { platform = "docker" }
+  refresh_interval = "5s"
+  forward_to       = [loki.process.json.receiver]
+}
+
+local.file_match "host_logs" {
+  path_targets = [{
+    __path__ = "/host-logs/*.log",
+    job      = "fastapi",
+    platform = "host",
+  }]
+  sync_period = "5s"
+}
+
+loki.source.file "host_logs" {
+  targets    = local.file_match.host_logs.targets
+  forward_to = [loki.process.json.receiver]
+}
+
+loki.process "json" {
+  forward_to = [loki.write.default.receiver]
+
+  // Non-JSON lines (other containers' plain text) simply extract nothing and pass
+  // through untouched, so the stack's own logs stay searchable too.
+  stage.json {
+    expressions = {
+      level           = "level",
+      log_type        = "type",
+      logger          = "logger",
+      service         = "service",
+      environment     = "environment",
+      traceID         = "traceID",
+      spanID          = "spanID",
+      correlation_id  = "correlation_id",
+      written_at      = "written_at",
+      response_status = "response_status",
+      request_route   = "request_route",
+    }
+  }
+
+  // Use the application's own timestamp so Grafana orders lines by when they
+  // happened, not by when Alloy happened to read them.
+  stage.timestamp {
+    source            = "written_at"
+    format            = "RFC3339"
+    action_on_failure = "skip"
+  }
+
+  // Low cardinality only. These become real Loki stream labels.
+  stage.labels {
+    values = {
+      level       = "",
+      log_type    = "",
+      service     = "",
+      environment = "",
+    }
+  }
+
+  // High cardinality, but needed per line: structured metadata is indexed for
+  // filtering without exploding the number of streams.
+  stage.structured_metadata {
+    values = {
+      traceID         = "",
+      spanID          = "",
+      correlation_id  = "",
+      logger          = "",
+      response_status = "",
+      request_route   = "",
+    }
+  }
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

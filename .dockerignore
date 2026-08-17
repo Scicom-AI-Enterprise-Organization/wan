@@ -1,0 +1,13 @@
+.git
+.github
+grafana
+scripts
+tests
+**/__pycache__
+*.egg-info
+.pytest_cache
+.venv
+venv
+build
+dist
+*.png

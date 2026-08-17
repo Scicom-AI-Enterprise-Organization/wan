@@ -1,0 +1,2 @@
+# Alloy tails *.log here, for running the app on the host with
+# LOG_FILE=grafana/logs/app.log instead of inside docker.

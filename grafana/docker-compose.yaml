@@ -1,0 +1,126 @@
+# Full local observability stack: the app, Tempo (traces), Loki (logs),
+# Alloy (log shipping), Prometheus (metrics) and Grafana wired together.
+#
+# Host ports come from grafana/.env so this can coexist with another stack on the
+# same machine. Defaults below are the canonical ones.
+name: fastapi-loki-tempo
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    labels:
+      # Read by Alloy's docker discovery and turned into the Loki `job` label.
+      logs.job: fastapi
+    environment:
+      SERVICE_NAME: ${SERVICE_NAME:-fastapi-loki-tempo}
+      SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+      DEPLOYMENT_ENVIRONMENT: local
+      OTLP_ENDPOINT: http://tempo:4317
+      OTLP_PROTOCOL: grpc
+      TRACING_SAMPLE: "1.0"
+      LOGLEVEL: INFO
+      ENABLE_HTTPX_INSTRUMENTATION: "true"
+      # /chain calls back through the compose network to show trace propagation.
+      SELF_URL: http://app:8000
+    ports:
+      - "${APP_PORT:-7072}:8000"
+    depends_on:
+      - tempo
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:2.7.1
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./tempo.yaml:/etc/tempo/tempo.yaml:ro
+      # Named volume, not a bind mount: the image ships /var/tempo owned by uid
+      # 10001, and docker preserves that ownership only for named volumes.
+      - tempo-data:/var/tempo
+    ports:
+      - "${TEMPO_PORT:-3200}:3200"                       # HTTP API + TraceQL
+      - "${TEMPO_OTLP_GRPC_PORT:-4317}:4317"             # OTLP gRPC
+      - "${TEMPO_OTLP_HTTP_PORT:-4318}:4318"             # OTLP HTTP
+      - "${TEMPO_JAEGER_COMPACT_PORT:-6831}:6831/udp"    # legacy jaeger thrift
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.4.2
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:v1.7.4
+    # Needs read access to the docker socket, which is root owned.
+    user: root
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./alloy.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # For an app run on the host with LOG_FILE=grafana/logs/app.log.
+      - ./logs:/host-logs
+      - alloy-data:/var/lib/alloy/data
+    ports:
+      - "${ALLOY_PORT:-12345}:12345"
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=24h
+      # Tempo's metrics generator pushes span metrics and service graphs here.
+      - --web.enable-remote-write-receiver
+      # Lets a Prometheus data point link straight to its trace in Tempo.
+      - --enable-feature=exemplar-storage
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    environment:
+      # Local demo stack: browse dashboards and Explore without logging in.
+      # Grafana 11 only supports Viewer for anonymous, hence viewers_can_edit so
+      # Explore still works. Log in as admin/admin for the full thing.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_VIEWERS_CAN_EDIT: "true"
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_FEATURE_TOGGLES_ENABLE: traceqlEditor traceQLStreaming metricsSummary
+      GF_USERS_DEFAULT_THEME: dark
+      GF_LOG_LEVEL: warn
+    volumes:
+      - ./provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - loki
+      - tempo
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  tempo-data:
+  loki-data:
+  alloy-data:
+  prometheus-data:
+  grafana-data:

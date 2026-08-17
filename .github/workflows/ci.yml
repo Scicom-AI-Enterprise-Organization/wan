@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -e '.[dev]'
+      - run: pytest -q
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Start the stack
+        run: docker compose -f grafana/docker-compose.yaml up -d --build
+
+      - name: End-to-end verification
+        run: python3 scripts/e2e.py
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose -f grafana/docker-compose.yaml logs --tail 200
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f grafana/docker-compose.yaml down -v
