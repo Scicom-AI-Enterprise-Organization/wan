@@ -114,6 +114,8 @@ uvicorn app:app --reload --host 0.0.0.0 --port 7072
 | `ENABLE_REQUEST_LOG` | `true` | Emit `type=request` lines |
 | `LOG_EXCLUDE_URLS` | `/healthz,/livez,/readyz,/metrics` | Path prefixes not to request-log |
 | `CORRELATION_ID_HEADERS` | `x-correlation-id,correlation-id,x-request-id,request-id` | Inbound headers to reuse as the correlation id |
+| `CORRELATION_ID_HEADER` | `X-Correlation-ID` | Header written on responses and on outbound calls |
+| `ENABLE_CORRELATION_ID_PROPAGATION` | `true` | Forward the correlation id on outbound calls |
 | `ENABLE_PROMETHEUS_METRICS` | `true` | Expose `/metrics` |
 | `METRICS_ENDPOINT` | `/metrics` | Where |
 | `ENABLE_HEALTH_ENDPOINTS` | `true` | Add `/healthz`, `/livez`, `/readyz` |
@@ -126,19 +128,73 @@ uvicorn app:app --reload --host 0.0.0.0 --port 7072
 | `ENABLE_REQUESTS_INSTRUMENTATION` | `false` | Trace outbound `requests` calls (needs the `requests` extra) |
 | `JAEGER_HOST` / `JAEGER_PORT` | – / `6831` | Deprecated, see below |
 
-### Correlating logs and traces yourself
+### Correlation ids across services
+
+One id for one logical request, however many services it touches. Both directions are
+automatic.
+
+**Inbound.** If the caller already sent a correlation id, it is reused rather than
+regenerated. Any header in `CORRELATION_ID_HEADERS` is accepted, checked in order, so
+services that call it `X-Request-ID` work without config:
+
+```bash
+curl localhost:7072/random -H 'X-Correlation-ID: id-from-service-a'
+# every log line for this request logs correlation_id=id-from-service-a
+# and the response echoes back X-Correlation-ID: id-from-service-a
+```
+
+Only when no header is present is a fresh uuid4 minted.
+
+**Outbound.** The id is attached to calls this service makes, so the next service
+receives it and reuses it. An outgoing request starts with empty headers — it does not
+inherit the inbound ones — so this is a real step, not a no-op:
 
 ```python
-import fastapi_loki_tempo
+# no headers passed by hand; the id rides along next to `traceparent`
+async with httpx.AsyncClient() as client:
+    await client.get('http://service-b/work')
+```
 
-trace_id, span_id, dd_trace_id = fastapi_loki_tempo.get_trace_ids()
-correlation_id = fastapi_loki_tempo.get_correlation_id()
+That works through an OpenTelemetry `TextMapPropagator`
+(`fastapi_loki_tempo/propagation.py`) composed onto the global propagator, which is what
+every OpenTelemetry HTTP instrumentation injects into its outbound headers. So it covers
+httpx, requests, aiohttp, urllib and grpc alike instead of needing an integration per
+client library. The value is read from the request context at the moment of the call, so
+it is always the current request's id.
 
-# Forward the correlation id on an outbound call. `traceparent` is injected
-# automatically by the OpenTelemetry instrumentation; this is the extra bit.
+**It requires the client to be instrumented.** Set `ENABLE_HTTPX_INSTRUMENTATION=true`
+or `ENABLE_REQUESTS_INSTRUMENTATION=true` (the `httpx` / `requests` extras). For a client
+that is not instrumented, pass the header yourself:
+
+```python
 async with httpx.AsyncClient(headers=fastapi_loki_tempo.correlation_headers()) as client:
     ...
 ```
+
+Reading the current ids anywhere in a request:
+
+```python
+trace_id, span_id, dd_trace_id = fastapi_loki_tempo.get_trace_ids()
+correlation_id = fastapi_loki_tempo.get_correlation_id()
+```
+
+Then in Loki, one id gives you every service's logs for that request:
+
+```logql
+{job=~"fastapi|service-b"} | correlation_id="id-from-service-a"
+```
+
+### Correlation id vs trace id
+
+They answer different questions and both are on every line:
+
+| | Set by | Survives hops via | Use it for |
+|---|---|---|---|
+| `traceID` | OpenTelemetry | `traceparent` (W3C standard) | jumping to the trace in Tempo; span timings |
+| `correlation_id` | this library | `X-Correlation-ID` | grepping logs, and giving the id to a customer in an error response |
+
+A trace id only exists while tracing is on and is dropped by sampling; a correlation id
+is always present and is safe to show a user or put in a support ticket.
 
 ## Example
 
@@ -194,6 +250,102 @@ docker compose -f grafana/docker-compose.yaml up -d tempo loki alloy prometheus 
 OTLP_ENDPOINT=http://localhost:4327 \
 LOG_FILE=grafana/logs/app.log \
 uvicorn app:app --reload --host 0.0.0.0 --port 7072
+```
+
+### Two services sharing one correlation id
+
+`app` calls itself, which shows propagation but keeps a single `service.name`. The
+`two-services` profile runs two genuinely separate services, both exporting to the same
+Tempo and both shipping logs to the same Loki:
+
+```bash
+docker compose -f grafana/docker-compose.yaml --profile two-services up -d --build
+python3 scripts/two_services.py
+```
+
+It calls `service-a` with a correlation id, as a gateway or upstream service would, and
+asserts the id is reused by A, forwarded to B, and that one trace covers both:
+
+```
+A -> B response: {"service": "service-a", "depth": 1, "downstream": {"service": "service-b", "message": "leaf"}}
+
+PASS  A actually called B                                    service-a -> service-b
+PASS  A reused the caller-supplied correlation id            A echoed back sim-from-caller-...
+PASS  one correlation_id filter returns both services' logs  ['service-a', 'service-b'] on 1 trace
+PASS  each service is independently queryable in Loki        service-a=3 lines, service-b=2 lines
+PASS  Tempo holds one trace covering both services           7 spans across ['service-a', 'service-b']
+PASS  the logged traceID is the one Tempo indexed            5 log lines carry traceID=...
+PASS  Tempo service graph shows the A -> B edge              1 series for service-a -> service-b
+```
+
+The resulting log lines, from two different containers, one correlation id and one
+trace id:
+
+```
+service=service-a  type=log      correlation_id=sim-from-caller-...  traceID=7a15c7cc..  spanID=2e41f7133b0d528a
+  chain depth=1 on service-a
+service=service-a  type=log      correlation_id=sim-from-caller-...  traceID=7a15c7cc..  spanID=2e41f7133b0d528a
+  HTTP Request: GET http://service-b:8000/chain?depth=0 "HTTP/1.1 200 OK"
+service=service-a  type=request  correlation_id=sim-from-caller-...  traceID=7a15c7cc..  spanID=2e41f7133b0d528a
+  GET /chain -> 200
+service=service-b  type=log      correlation_id=sim-from-caller-...  traceID=7a15c7cc..  spanID=a0af0b131e94f8ad
+  chain depth=0 on service-b
+service=service-b  type=request  correlation_id=sim-from-caller-...  traceID=7a15c7cc..  spanID=a0af0b131e94f8ad
+  GET /chain -> 200
+```
+
+Same `traceID`, same `correlation_id`, different `spanID` per service. In Grafana:
+
+```logql
+{job="fastapi"} | correlation_id="<the id>"      # both services' logs
+{service="service-b"} | correlation_id="<the id>" # just B's
+```
+
+Tempo's service graph gains a real edge, visible under the Tempo datasource's
+**Service Graph** tab:
+
+```
+user       -> service-a   count=1
+service-a  -> service-b   count=1
+```
+
+Point a service at any other instance with `DOWNSTREAM_URL` to extend the chain.
+
+### Deep links into Grafana
+
+`two_services.py` prints ready-to-open Grafana links when it finishes. For any other
+trace, generate them:
+
+```bash
+python3 scripts/links.py                                  # newest trace in Tempo
+python3 scripts/links.py --trace 7408a823301db5736ca02a4c2f163630
+python3 scripts/links.py --correlation sim-from-caller-1786967724
+python3 scripts/links.py --service service-a
+```
+
+It prints six links: the trace in Tempo, its logs in Loki, **both side by side in one
+Explore view**, a TraceQL search, the service graph, and the dashboard.
+
+Grafana's Explore state is a JSON blob in the query string, so these are generated
+rather than hand written — the shape is `?schemaVersion=1&orgId=1&panes={...}`, with one
+entry per pane:
+
+```python
+panes = {
+  "lg": {"datasource": "loki",  "queries": [{"expr": '{job="fastapi"} | correlation_id="..."'}], ...},
+  "tr": {"datasource": "tempo", "queries": [{"queryType": "traceql", "query": "<traceID>"}], ...},
+}
+```
+
+Two keys in `panes` is what gives you logs and the flame graph in one screen, which is
+usually what you want when debugging a cross-service request.
+
+`scripts/links.py` is importable if you want the URLs elsewhere:
+
+```python
+from links import explore_url, loki_pane, tempo_pane
+
+explore_url({'lg': loki_pane('{job="fastapi"}'), 'tr': tempo_pane(trace_id)})
 ```
 
 ### Verifying it actually works

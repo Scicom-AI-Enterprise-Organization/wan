@@ -23,9 +23,55 @@ services:
       LOGLEVEL: INFO
       ENABLE_HTTPX_INSTRUMENTATION: "true"
       # /chain calls back through the compose network to show trace propagation.
-      SELF_URL: http://app:8000
+      DOWNSTREAM_URL: http://app:8000
     ports:
       - "${APP_PORT:-7072}:8000"
+    depends_on:
+      - tempo
+    restart: unless-stopped
+
+  # Two genuinely separate services, so a single trace spans two service.name values
+  # and the Tempo service graph gets a real service-a -> service-b edge.
+  # Opt in:  docker compose -f grafana/docker-compose.yaml --profile two-services up -d
+  service-a:
+    profiles: ["two-services"]
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    labels:
+      logs.job: fastapi
+    environment:
+      SERVICE_NAME: service-a
+      SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+      DEPLOYMENT_ENVIRONMENT: local
+      OTLP_ENDPOINT: http://tempo:4317
+      LOGLEVEL: INFO
+      ENABLE_HTTPX_INSTRUMENTATION: "true"
+      DOWNSTREAM_URL: http://service-b:8000
+    ports:
+      - "${SERVICE_A_PORT:-7080}:8000"
+    depends_on:
+      - tempo
+    restart: unless-stopped
+
+  service-b:
+    profiles: ["two-services"]
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    labels:
+      logs.job: fastapi
+    environment:
+      SERVICE_NAME: service-b
+      SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+      DEPLOYMENT_ENVIRONMENT: local
+      OTLP_ENDPOINT: http://tempo:4317
+      LOGLEVEL: INFO
+      ENABLE_HTTPX_INSTRUMENTATION: "true"
+      # B is the leaf; call it with ?depth=0 so it does not hop further.
+      DOWNSTREAM_URL: http://service-b:8000
+    ports:
+      - "${SERVICE_B_PORT:-7081}:8000"
     depends_on:
       - tempo
     restart: unless-stopped

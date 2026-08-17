@@ -25,9 +25,13 @@ fastapi_loki_tempo.patch(app=app)
 
 tracer = trace.get_tracer(__name__)
 
-#: Used by /chain to call itself, which is enough to show trace propagation
-#: across a service boundary without running two services.
-SELF_URL = os.environ.get('SELF_URL', 'http://localhost:7072')
+SERVICE_NAME = os.environ.get('SERVICE_NAME', 'fastapi')
+
+#: Where /chain sends its next hop. Point it at another instance to get a real
+#: two-service trace; left at itself it still demonstrates propagation.
+DOWNSTREAM_URL = os.environ.get(
+    'DOWNSTREAM_URL', os.environ.get('SELF_URL', 'http://localhost:7072'),
+)
 
 
 @app.get('/')
@@ -68,23 +72,24 @@ async def nested(request: Request = None):
 
 @app.get('/chain')
 async def chain(depth: int = 1, request: Request = None):
-    """Call itself `depth` more times: one trace, several spans, several log lines."""
-    logging.info(f'chain depth={depth}')
+    """Call `DOWNSTREAM_URL` `depth` more times: one trace and one correlation id."""
+    logging.info(f'chain depth={depth} on {SERVICE_NAME}')
     if depth <= 0:
-        return {'message': 'leaf'}
+        return {'service': SERVICE_NAME, 'message': 'leaf'}
 
     import httpx
 
-    # `traceparent` is injected automatically by the httpx instrumentation, which is
-    # what keeps the trace joined. The correlation id is not a W3C standard header,
-    # so forward it explicitly to keep one id across all hops too.
-    async with httpx.AsyncClient(
-        timeout=10.0,
-        headers=fastapi_loki_tempo.correlation_headers(),
-    ) as client:
-        response = await client.get(f'{SELF_URL}/chain', params={'depth': depth - 1})
+    # No correlation headers passed by hand: the httpx instrumentation injects both
+    # `traceparent` and `X-Correlation-ID` from the global propagator, so the trace
+    # and the correlation id both survive the hop.
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(f'{DOWNSTREAM_URL}/chain', params={'depth': depth - 1})
         response.raise_for_status()
-        return {'depth': depth, 'downstream': response.json()}
+        return {
+            'service': SERVICE_NAME,
+            'depth': depth,
+            'downstream': response.json(),
+        }
 
 
 @app.get('/boom')

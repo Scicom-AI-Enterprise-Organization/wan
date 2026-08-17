@@ -31,6 +31,13 @@ logs: ## follow the app's JSON logs
 e2e: ## end-to-end verification against a running stack
 	python3 scripts/e2e.py
 
+two-services: ## run app A -> app B and verify they share one correlation id
+	$(COMPOSE) --profile two-services up -d --build service-a service-b
+	python3 scripts/two_services.py
+
+links: ## print Grafana deep links for the newest trace
+	python3 scripts/links.py
+
 traffic: ## generate some requests to look at in Grafana
 	@port=$$(grep '^APP_PORT' grafana/.env | cut -d= -f2); \
 	for i in $$(seq 1 30); do \

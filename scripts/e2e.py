@@ -49,6 +49,10 @@ DEFAULT_PORTS = {
 SERVICE_NAME = 'fastapi-loki-tempo'
 GRAFANA_AUTH = ('admin', 'admin')
 
+#: Stands in for an id minted by an upstream service, to prove it is reused and
+#: forwarded rather than regenerated at each hop.
+INBOUND_CORRELATION_ID = f'e2e-from-upstream-{int(time.time())}'
+
 GREEN, RED, YELLOW, DIM, RESET = '\033[32m', '\033[31m', '\033[33m', '\033[2m', '\033[0m'
 
 
@@ -213,6 +217,18 @@ def generate_traffic():
     status_of(f'{APP}/not-found')
     status_of(f'{APP}/boom')
     status_of(f'{APP}/')
+    # Pose as an upstream service that already has a correlation id, and walk it
+    # through two more hops. Every hop must log this exact id.
+    request_with_header(f'{APP}/chain?depth=2', 'X-Correlation-ID', INBOUND_CORRELATION_ID)
+
+
+def request_with_header(url, header, value):
+    req = urllib.request.Request(url, headers={header: value})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return response.status, dict(response.headers)
+    except urllib.error.HTTPError as e:
+        return e.code, dict(e.headers)
 
 
 # --- checks ------------------------------------------------------------------------
@@ -300,6 +316,39 @@ def main():
         assert_that(multi, 'no trace covered all 3 hops of /chain?depth=2')
         return f'trace {multi[0][:12]}.. spans {len(chains[multi[0]])} hops'
     check('trace context propagates across service hops', chain_propagates)
+
+    def inbound_correlation_id_is_reused():
+        status, headers = request_with_header(
+            f'{APP}/', 'X-Correlation-ID', INBOUND_CORRELATION_ID)
+        returned = headers.get('X-Correlation-ID') or headers.get('x-correlation-id')
+        assert_that(
+            returned == INBOUND_CORRELATION_ID,
+            f'response echoed {returned!r}, not the id we sent',
+        )
+        return f'echoed back as {returned}'
+    check('inbound correlation id is reused, not regenerated', inbound_correlation_id_is_reused)
+
+    def correlation_id_survives_every_hop():
+        """The outbound half: A -> B -> C must all log the id A supplied.
+
+        Without propagation each hop mints its own id, and a single logical request
+        becomes three unrelated ids in Loki.
+        """
+        hops = [
+            o for o in objects
+            if o.get('type') == 'request'
+            and o.get('request') == '/chain'
+            and o.get('correlation_id') == INBOUND_CORRELATION_ID
+        ]
+        assert_that(hops, f'no /chain hop logged {INBOUND_CORRELATION_ID}')
+        assert_that(
+            len(hops) >= 3,
+            f'only {len(hops)} of 3 hops carried the id; propagation is dropping it',
+        )
+        trace_ids = {o['traceID'] for o in hops}
+        assert_that(len(trace_ids) == 1, f'hops split across {len(trace_ids)} traces')
+        return f'{len(hops)} hops, 1 correlation id, 1 trace'
+    check('correlation id survives every outbound hop', correlation_id_survives_every_hop)
 
     def error_is_captured():
         errors = [o for o in objects if o.get('request') == '/boom']
@@ -403,7 +452,11 @@ def main():
     def only_this_project_is_scraped():
         data = get_json(f'{LOKI}/loki/api/v1/label/compose_service/values')
         services = set(data.get('data') or [])
-        expected = {'app', 'tempo', 'loki', 'alloy', 'prometheus', 'grafana'}
+        expected = {
+            'app', 'tempo', 'loki', 'alloy', 'prometheus', 'grafana',
+            # Present only when the `two-services` profile is up.
+            'service-a', 'service-b',
+        }
         stray = services - expected
         assert_that(not stray, f'Alloy is scraping unrelated containers: {sorted(stray)}')
         return f'compose_service values: {sorted(services)}'
@@ -585,8 +638,9 @@ def main():
                 print(f'  {RED}FAIL{RESET} {name}: {detail}')
         return 1
     print(f'{GREEN}all {passed} checks passed{RESET}')
-    print(f'\nGrafana: {GRAFANA}/d/fastapi-loki-tempo')
-    print(f'Scalar:  {APP}/scalar')
+    print(f'\nDashboard: {GRAFANA}/d/fastapi-loki-tempo')
+    print(f'Scalar:    {APP}/scalar')
+    print(f'\nDeep links for the trace above:  python3 scripts/links.py --trace {trace_id}')
     return 0
 
 

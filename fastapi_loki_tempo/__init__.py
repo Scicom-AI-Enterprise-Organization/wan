@@ -18,6 +18,7 @@ from typing import Any, Dict, Iterable, Optional
 from fastapi import Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from fastapi_loki_tempo import propagation
 from fastapi_loki_tempo import scalar as scalar_module
 from fastapi_loki_tempo.context import (
     EMPTY_VALUE,
@@ -36,6 +37,7 @@ from fastapi_loki_tempo.logs import (
     setup_logging,
 )
 from fastapi_loki_tempo.middleware import RequestLoggingMiddleware
+from fastapi_loki_tempo.propagation import CorrelationIdPropagator
 from fastapi_loki_tempo.os_env import *  # noqa: F401,F403  (env-derived defaults)
 from fastapi_loki_tempo.tracing import flush, setup_tracing
 
@@ -53,6 +55,7 @@ __all__ = [
     'setup_tracing',
     'JsonLogFormatter',
     'RequestLoggingMiddleware',
+    'CorrelationIdPropagator',
     'EMPTY_VALUE',
     'REQUEST_LOGGER_NAME',
     'TYPE_LOG',
@@ -91,6 +94,8 @@ def patch(
     enable_request_log: bool = ENABLE_REQUEST_LOG,  # noqa: F405
     log_exclude_urls: Iterable[str] = LOG_EXCLUDE_URLS,  # noqa: F405
     correlation_id_headers: Iterable[str] = CORRELATION_ID_HEADERS,  # noqa: F405
+    correlation_id_header: str = CORRELATION_ID_HEADER,  # noqa: F405
+    enable_correlation_id_propagation: bool = ENABLE_CORRELATION_ID_PROPAGATION,  # noqa: F405
     metrics_endpoint: str = METRICS_ENDPOINT,  # noqa: F405
     enable_health_endpoints: bool = ENABLE_HEALTH_ENDPOINTS,  # noqa: F405
     scalar_title: Optional[str] = SCALAR_TITLE,  # noqa: F405
@@ -172,8 +177,15 @@ def patch(
         RequestLoggingMiddleware,
         exclude_urls=log_exclude_urls,
         correlation_id_headers=correlation_id_headers,
+        correlation_id_response_header=correlation_id_header,
         log_requests=enable_request_log,
     )
+
+    if enable_correlation_id_propagation:
+        # Composed onto the global OpenTelemetry propagator, so every instrumented
+        # outbound client forwards the correlation id next to `traceparent`, and the
+        # next service reuses it instead of starting a new one.
+        propagation.install(correlation_id_header)
 
     tracer_provider = setup_tracing(
         service_name=service_name,

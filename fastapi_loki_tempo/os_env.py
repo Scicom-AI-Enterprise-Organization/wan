@@ -98,10 +98,16 @@ LOG_FILE_BACKUP_COUNT = env_int('LOG_FILE_BACKUP_COUNT', 3)
 LOG_MAX_MSG_LENGTH = env_int('LOG_MAX_MSG_LENGTH', 0)
 ENABLE_REQUEST_LOG = env_bool('ENABLE_REQUEST_LOG', True)
 LOG_EXCLUDE_URLS = env_list('LOG_EXCLUDE_URLS', '/healthz,/livez,/readyz,/metrics')
+# Inbound: any of these is reused as the correlation id, so an id created by the
+# first service in a chain survives every hop instead of each hop minting its own.
 CORRELATION_ID_HEADERS = env_list(
     'CORRELATION_ID_HEADERS',
     'x-correlation-id,correlation-id,x-request-id,request-id',
 )
+# Outbound and on responses: the single canonical header this service writes.
+CORRELATION_ID_HEADER = env_str('CORRELATION_ID_HEADER', 'X-Correlation-ID')
+# Attach it to outbound calls made by any OpenTelemetry-instrumented HTTP client.
+ENABLE_CORRELATION_ID_PROPAGATION = env_bool('ENABLE_CORRELATION_ID_PROPAGATION', True)
 
 # --- extras ---------------------------------------------------------------------------
 ENABLE_PROMETHEUS_METRICS = env_bool('ENABLE_PROMETHEUS_METRICS', True)
