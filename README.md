@@ -41,7 +41,7 @@ too) and `request_route`.
 ## Installation
 
 ```bash
-pip3 install git+https://github.com/huseinzol05/fastapi-loki-tempo
+pip3 install git+https://github.com/Scicom-AI-Enterprise-Organization/fastapi-loki-tempo
 ```
 
 ## How to
@@ -285,7 +285,9 @@ page shows an explicit error and a link to the raw spec if the bundle cannot loa
 
 ## What changed from the original
 
-Behaviour that was wrong or missing before:
+This is a rewrite of [huseinzol05/fastapi-loki-tempo](https://github.com/huseinzol05/fastapi-loki-tempo).
+`patch()` keeps the same signature, and the log schema is unchanged, so it is a drop-in
+replacement. Behaviour that was wrong or missing before:
 
 - **Loki, Grafana and Prometheus were not in the stack at all.** `grafana/docker-compose.yaml`
   only ran Tempo and a Jaeger UI, so nothing in a repo called `fastapi-loki-tempo`
