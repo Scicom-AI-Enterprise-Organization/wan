@@ -26,6 +26,7 @@ from wan.context import (
     get_correlation_id,
     get_trace_ids,
     new_correlation_id,
+    reset_correlation_id,
     set_correlation_id,
     trace_context,
 )
@@ -38,6 +39,8 @@ from wan.logs import (
 )
 from wan.middleware import RequestLoggingMiddleware
 from wan.propagation import CorrelationIdPropagator
+from wan import sentry as sentry_module
+from wan.sentry import setup_sentry
 from wan.os_env import *  # noqa: F401,F403  (env-derived defaults)
 from wan.tracing import flush, setup_tracing
 
@@ -51,8 +54,10 @@ __all__ = [
     'trace_context',
     'new_correlation_id',
     'set_correlation_id',
+    'reset_correlation_id',
     'setup_logging',
     'setup_tracing',
+    'setup_sentry',
     'JsonLogFormatter',
     'RequestLoggingMiddleware',
     'CorrelationIdPropagator',
@@ -103,6 +108,19 @@ def patch(
     scalar_theme: str = SCALAR_THEME,  # noqa: F405
     scalar_dark_mode: bool = SCALAR_DARK_MODE,  # noqa: F405
     scalar_js_url: Optional[str] = SCALAR_JS_URL,  # noqa: F405
+    sentry_dsn: Optional[str] = SENTRY_DSN,  # noqa: F405
+    enable_sentry: bool = ENABLE_SENTRY,  # noqa: F405
+    sentry_environment: Optional[str] = SENTRY_ENVIRONMENT,  # noqa: F405
+    sentry_release: Optional[str] = SENTRY_RELEASE,  # noqa: F405
+    sentry_traces_sample_rate: float = SENTRY_TRACES_SAMPLE_RATE,  # noqa: F405
+    sentry_profiles_sample_rate: float = SENTRY_PROFILES_SAMPLE_RATE,  # noqa: F405
+    sentry_instrumenter: str = SENTRY_INSTRUMENTER,  # noqa: F405
+    sentry_send_default_pii: bool = SENTRY_SEND_DEFAULT_PII,  # noqa: F405
+    sentry_event_level: str = SENTRY_EVENT_LEVEL,  # noqa: F405
+    sentry_breadcrumb_level: str = SENTRY_BREADCRUMB_LEVEL,  # noqa: F405
+    grafana_url: Optional[str] = GRAFANA_URL,  # noqa: F405
+    grafana_loki_selector: str = GRAFANA_LOKI_SELECTOR,  # noqa: F405
+    grafana_dashboard_uid: str = GRAFANA_DASHBOARD_UID,  # noqa: F405
     enable_httpx_instrumentation: bool = ENABLE_HTTPX_INSTRUMENTATION,  # noqa: F405
     enable_requests_instrumentation: bool = ENABLE_REQUESTS_INSTRUMENTATION,  # noqa: F405
 ) -> Dict[str, Any]:
@@ -181,6 +199,8 @@ def patch(
         correlation_id_headers=correlation_id_headers,
         correlation_id_response_header=correlation_id_header,
         log_requests=enable_request_log,
+        # No-op until setup_sentry() runs below; it checks its own enabled flag.
+        on_request_start=sentry_module.bind_request_scope,
     )
 
     if enable_correlation_id_propagation:
@@ -212,6 +232,28 @@ def patch(
             app,
             tracer_provider=tracer_provider,
             excluded_urls=trace_exclude_urls or None,
+        )
+
+    sentry_enabled = False
+    if enable_sentry:
+        # After setup_tracing: the 'otel' instrumenter needs the provider to exist, and
+        # errors-only mode needs get_trace_ids() to return real ids.
+        sentry_enabled = setup_sentry(
+            dsn=sentry_dsn,
+            service_name=service_name,
+            environment=sentry_environment,
+            release=sentry_release,
+            traces_sample_rate=sentry_traces_sample_rate,
+            profiles_sample_rate=sentry_profiles_sample_rate,
+            send_default_pii=sentry_send_default_pii,
+            event_level=sentry_event_level,
+            breadcrumb_level=sentry_breadcrumb_level,
+            instrumenter=sentry_instrumenter,
+            grafana_url=grafana_url,
+            loki_selector=grafana_loki_selector,
+            dashboard_uid=grafana_dashboard_uid,
+            ignore_loggers=(REQUEST_LOGGER_NAME,),
+            tracer_provider=tracer_provider,
         )
 
     if enable_httpx_instrumentation:
@@ -255,6 +297,7 @@ def patch(
         'tracer_provider': tracer_provider,
         'formatter': formatter,
         'otlp_endpoint': otlp_endpoint,
+        'sentry_enabled': sentry_enabled,
         'scalar_doc_endpoint': scalar_doc_endpoint if enable_scalar_doc else None,
         'metrics_endpoint': metrics_endpoint if enable_prometheus_metrics else None,
     }
@@ -264,9 +307,11 @@ def patch(
         'message': 'wan patched',
         'service_name': service_name,
         'otlp_endpoint': otlp_endpoint,
+        'sentry_enabled': sentry_enabled,
         'tracing_sample': tracing_sample,
         'prometheus_metrics': enable_prometheus_metrics,
         'scalar_doc': scalar_doc_endpoint if enable_scalar_doc else None,
+        'sentry': sentry_enabled,
     })
     return state
 

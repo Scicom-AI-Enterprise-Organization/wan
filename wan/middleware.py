@@ -10,7 +10,7 @@ id readable from ordinary ``logging`` calls inside handlers.
 import logging
 import sys
 import time
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from wan.context import (
     EMPTY_VALUE,
@@ -79,6 +79,7 @@ class RequestLoggingMiddleware:
         trace_id_response_header: str = 'X-Trace-Id',
         logger_name: str = REQUEST_LOGGER_NAME,
         log_requests: bool = True,
+        on_request_start: Optional[Callable[..., None]] = None,
     ):
         self.app = app
         self.exclude_urls = tuple(exclude_urls or ())
@@ -94,6 +95,8 @@ class RequestLoggingMiddleware:
             if trace_id_response_header else None
         )
         self.log_requests = log_requests
+        # Hook for anything that must see the ids while the request is live.
+        self.on_request_start = on_request_start
         self.logger = logging.getLogger(logger_name)
 
     def excluded(self, path: str) -> bool:
@@ -121,6 +124,13 @@ class RequestLoggingMiddleware:
         should_log = self.log_requests and not self.excluded(path)
         started_monotonic = time.monotonic()
         received_at = iso_time(time.time())
+
+        if self.on_request_start is not None:
+            # The OpenTelemetry middleware is outside this one, so its span is already
+            # active and the trace id is available here.
+            trace_id, span_id, _ = get_trace_ids()
+            self.on_request_start(
+                correlation_id=correlation_id, trace_id=trace_id, span_id=span_id)
 
         status: Optional[int] = None
         response_headers: RawHeaders = ()

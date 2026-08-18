@@ -99,6 +99,14 @@ async def boom(request: Request = None):
     return {'result': 1 / 0}
 
 
+@app.get('/sentry-debug')
+async def trigger_error(request: Request = None):
+    """Sentry's onboarding check. Also proves the event carries the trace id."""
+    logging.info('about to divide by zero for sentry')
+    division_by_zero = 1 / 0
+    return {'unreachable': division_by_zero}
+
+
 @app.get('/not-found')
 async def not_found(request: Request = None):
     raise HTTPException(status_code=404, detail='nothing here')

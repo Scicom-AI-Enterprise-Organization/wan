@@ -10,7 +10,8 @@ WORKDIR /srv
 # Dependencies first so source edits do not invalidate the install layer.
 COPY requirements.txt ./
 RUN pip install -r requirements.txt \
-    && pip install 'uvicorn[standard]>=0.23' 'httpx>=0.24' opentelemetry-instrumentation-httpx
+    && pip install 'uvicorn[standard]>=0.23' 'httpx>=0.24' \
+        opentelemetry-instrumentation-httpx 'sentry-sdk>=2.0'
 
 COPY pyproject.toml README.md ./
 COPY wan ./wan

@@ -111,6 +111,30 @@ CORRELATION_ID_HEADER = env_str('CORRELATION_ID_HEADER', 'X-Correlation-ID')
 # Attach it to outbound calls made by any OpenTelemetry-instrumented HTTP client.
 ENABLE_CORRELATION_ID_PROPAGATION = env_bool('ENABLE_CORRELATION_ID_PROPAGATION', True)
 
+# --- sentry (errors) ------------------------------------------------------------------
+# Unset means Sentry is off, so the same image runs locally without an account.
+SENTRY_DSN = env_str('SENTRY_DSN')
+ENABLE_SENTRY = env_bool('ENABLE_SENTRY', True)
+SENTRY_ENVIRONMENT = env_str('SENTRY_ENVIRONMENT', DEPLOYMENT_ENVIRONMENT)
+SENTRY_RELEASE = env_str('SENTRY_RELEASE', SERVICE_VERSION)
+# 0 keeps Sentry to errors only and leaves tracing to Tempo. Two tracers over one
+# request means two trace ids, which is exactly the correlation this library exists
+# to avoid; raise it deliberately, with SENTRY_INSTRUMENTER=otel.
+SENTRY_TRACES_SAMPLE_RATE = env_float('SENTRY_TRACES_SAMPLE_RATE', 0.0)
+SENTRY_PROFILES_SAMPLE_RATE = env_float('SENTRY_PROFILES_SAMPLE_RATE', 0.0)
+SENTRY_INSTRUMENTER = (env_str('SENTRY_INSTRUMENTER', 'sentry') or 'sentry').lower()
+# Personally identifiable info (request bodies, headers, user ip) is off by default.
+SENTRY_SEND_DEFAULT_PII = env_bool('SENTRY_SEND_DEFAULT_PII', False)
+SENTRY_EVENT_LEVEL = (env_str('SENTRY_EVENT_LEVEL', 'ERROR') or 'ERROR').upper()
+SENTRY_BREADCRUMB_LEVEL = (env_str('SENTRY_BREADCRUMB_LEVEL', 'INFO') or 'INFO').upper()
+
+# Set this and every Sentry event gains clickable Loki/Tempo links. Must be the URL a
+# human reaches Grafana on, not an in-cluster address like http://grafana:3000.
+GRAFANA_URL = env_str('GRAFANA_URL')
+# Stream selector the generated LogQL starts from.
+GRAFANA_LOKI_SELECTOR = env_str('GRAFANA_LOKI_SELECTOR', '{job="fastapi"}')
+GRAFANA_DASHBOARD_UID = env_str('GRAFANA_DASHBOARD_UID', 'wan')
+
 # --- extras ---------------------------------------------------------------------------
 ENABLE_PROMETHEUS_METRICS = env_bool('ENABLE_PROMETHEUS_METRICS', True)
 METRICS_ENDPOINT = env_str('METRICS_ENDPOINT', '/metrics')

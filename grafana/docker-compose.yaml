@@ -26,6 +26,18 @@ services:
       TRACING_SAMPLE: "1.0"
       LOGLEVEL: INFO
       ENABLE_HTTPX_INSTRUMENTATION: "true"
+      # Off unless you put a DSN in grafana/.env. Sentry is a hosted service, so the
+      # local stack cannot provide one; the test suite covers it with a mock ingest.
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: local
+      SENTRY_SEND_DEFAULT_PII: ${SENTRY_SEND_DEFAULT_PII:-false}
+      # sentry-sdk reads this natively; logs its transport requests and responses.
+      SENTRY_DEBUG: ${SENTRY_DEBUG:-}
+      # Puts clickable Loki/Tempo links on every Sentry event. This URL is only ever
+      # rendered for a human, never fetched, so it must be the address *you* browse
+      # Grafana on -- override with a LAN address to share the links.
+      GRAFANA_URL: ${GRAFANA_URL:-http://localhost:${GRAFANA_PORT:-3000}}
+      GRAFANA_DASHBOARD_UID: wan
       # /chain calls back through the compose network to show trace propagation.
       DOWNSTREAM_URL: http://app:8000
     ports:
@@ -46,6 +58,10 @@ services:
       logs.job: fastapi
     environment:
       SERVICE_NAME: service-a
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: local
+      GRAFANA_URL: ${GRAFANA_URL:-http://localhost:${GRAFANA_PORT:-3000}}
+      GRAFANA_DASHBOARD_UID: wan
       SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
       DEPLOYMENT_ENVIRONMENT: local
       OTLP_ENDPOINT: http://tempo:4317
@@ -67,6 +83,10 @@ services:
       logs.job: fastapi
     environment:
       SERVICE_NAME: service-b
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: local
+      GRAFANA_URL: ${GRAFANA_URL:-http://localhost:${GRAFANA_PORT:-3000}}
+      GRAFANA_DASHBOARD_UID: wan
       SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
       DEPLOYMENT_ENVIRONMENT: local
       OTLP_ENDPOINT: http://tempo:4317

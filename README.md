@@ -100,6 +100,7 @@ wan.patch(app=app)
 | Tracing | OpenTelemetry spans exported to Tempo over OTLP |
 | Metrics | Prometheus at `/metrics` |
 | Health | `/healthz`, `/livez`, `/readyz`, excluded from traces and request logs |
+| Errors | Sentry, tagged with the same trace and correlation ids |
 | API docs | Scalar at `/scalar` |
 | Headers | `X-Correlation-ID` and `X-Trace-Id` on every response |
 
@@ -152,6 +153,18 @@ uvicorn app:app --reload --host 0.0.0.0 --port 7072
 | `CORRELATION_ID_HEADERS` | `x-correlation-id,correlation-id,x-request-id,request-id` | Inbound headers to reuse as the correlation id |
 | `CORRELATION_ID_HEADER` | `X-Correlation-ID` | Header written on responses and on outbound calls |
 | `ENABLE_CORRELATION_ID_PROPAGATION` | `true` | Forward the correlation id on outbound calls |
+| `SENTRY_DSN` | – | Enables Sentry error reporting. Unset = off |
+| `ENABLE_SENTRY` | `true` | Master switch, independent of the DSN |
+| `SENTRY_ENVIRONMENT` | `DEPLOYMENT_ENVIRONMENT` | Sentry environment |
+| `SENTRY_RELEASE` | `SERVICE_VERSION` | Sentry release, for regression tracking |
+| `SENTRY_TRACES_SAMPLE_RATE` | `0.0` | 0 = errors only, Tempo owns tracing. See below |
+| `SENTRY_INSTRUMENTER` | `sentry` | `otel` makes Sentry read spans from the OTel provider |
+| `SENTRY_EVENT_LEVEL` | `ERROR` | Log level that becomes a Sentry event |
+| `SENTRY_BREADCRUMB_LEVEL` | `INFO` | Log level that becomes a breadcrumb |
+| `SENTRY_SEND_DEFAULT_PII` | `false` | Send request bodies, headers and client IP |
+| `GRAFANA_URL` | – | Set it and every Sentry event gains clickable Loki/Tempo links |
+| `GRAFANA_LOKI_SELECTOR` | `{job="fastapi"}` | Stream selector the generated LogQL starts from |
+| `GRAFANA_DASHBOARD_UID` | `wan` | Dashboard the generated link points at |
 | `ENABLE_PROMETHEUS_METRICS` | `true` | Expose `/metrics` |
 | `METRICS_ENDPOINT` | `/metrics` | Where |
 | `ENABLE_HEALTH_ENDPOINTS` | `true` | Add `/healthz`, `/livez`, `/readyz` |
@@ -281,6 +294,119 @@ Then in Loki, one id gives you every service's logs for that request:
 ```logql
 {job=~"fastapi|service-b"} | correlation_id="id-from-service-a"
 ```
+
+### Sentry
+
+Set a DSN and errors start flowing; unset, it is completely off.
+
+```bash
+pip3 install 'wan[sentry] @ git+https://github.com/Scicom-AI-Enterprise-Organization/wan'
+SENTRY_DSN=https://key@o0.ingest.sentry.io/0 uvicorn app:app --port 7072
+```
+
+Sentry earns its place by doing what logs and traces cannot: grouping the same error
+across deploys, deduplicating it, alerting on it, and keeping the stack trace with local
+variables. It is a fourth signal, not a replacement for the other three.
+
+**Every event carries the same ids as Loki and Tempo**, which is the whole point:
+
+```json
+"tags": {
+  "correlation_id": "SENTRY-CID-42",
+  "traceID": "6ae51777c29ffd57d3e05174d4638299",
+  "spanID": "07454da51ff17487",
+  "service": "wan"
+},
+"contexts": {"trace": {"trace_id": "6ae51777c29ffd57d3e05174d4638299"}}
+```
+
+So from a Sentry issue you can go straight to the other two:
+
+```logql
+{job="fastapi"} | correlation_id="SENTRY-CID-42"     # Loki: every log line for it
+```
+```
+6ae51777c29ffd57d3e05174d4638299                     # Tempo: the trace
+```
+
+Search Sentry itself by `correlation_id:SENTRY-CID-42` to come the other way.
+
+#### Linking a Sentry issue to Grafana
+
+Set `GRAFANA_URL` to the address a human reaches Grafana on, and every event gains ready
+made Explore links:
+
+```bash
+GRAFANA_URL=http://192.168.88.102:3010
+```
+
+They land in two places on the issue, because Sentry versions differ in what they render
+as a clickable link — a **GRAFANA** context card, and **Additional Data**:
+
+```
+contexts.grafana:
+  logs_and_trace  -> Explore, logs and flame graph side by side
+  logs            -> Loki, filtered to this request's correlation id
+  trace           -> Tempo, this trace
+  dashboard       -> the service dashboard
+
+extra:
+  grafana_logs, grafana_trace, grafana_logs_and_trace, grafana_dashboard
+```
+
+The logs link filters by correlation id rather than trace id, because a correlation id
+covers every service the request touched and survives trace sampling:
+
+```logql
+{job="fastapi"} | correlation_id="grafana-link-001"
+```
+
+`GRAFANA_URL` must be reachable from your browser. An in-cluster address like
+`http://grafana:3000` produces links nobody can open.
+
+The builders are importable if you want links elsewhere:
+
+```python
+from wan.grafana import links_for
+
+links_for('http://grafana.example.com:3010', correlation_id=..., trace_id=...)
+```
+
+#### Why this needed work
+
+Two defaults would otherwise break the correlation, and neither fails loudly:
+
+- **Sentry mints its own trace id.** An issue would carry an id that exists nowhere in
+  Tempo or Loki. Every event's `contexts.trace.trace_id` is rewritten to the
+  OpenTelemetry id instead.
+- **Sentry's ASGI middleware wraps the whole app**, outside every user middleware. By
+  the time it captures an exception, this library's correlation ContextVar has been reset
+  and the OpenTelemetry span has ended, so reading the ids at send time finds nothing.
+  They are written onto Sentry's per-request isolation scope while the request is still
+  live instead (`wan/sentry.py:bind_request_scope`).
+
+Also handled: an unhandled 500 is logged by this library at ERROR *with* the traceback,
+and Sentry's FastAPI integration captures the same exception, so the request logger is
+passed to `ignore_logger()` — otherwise every failure arrives in Sentry twice.
+
+#### Errors only, by default
+
+`SENTRY_TRACES_SAMPLE_RATE` defaults to `0`: Sentry handles errors, Tempo handles
+tracing. Running both tracers over one request is what produces two different trace ids
+for the same work.
+
+To use Sentry's performance monitoring as well, raise the rate *and* set
+`SENTRY_INSTRUMENTER=otel` so Sentry reads spans from the existing OpenTelemetry provider
+rather than creating its own:
+
+```bash
+SENTRY_TRACES_SAMPLE_RATE=0.1 SENTRY_INSTRUMENTER=otel
+```
+
+With `instrumenter=otel` the trace context is left alone, since there Sentry's trace id
+is the key to its own span data. This path is wired up but not covered by the test suite,
+which mocks the Sentry ingest endpoint rather than using a real project — verify it
+against your own Sentry before relying on it.
 
 ### Correlation id vs trace id
 
