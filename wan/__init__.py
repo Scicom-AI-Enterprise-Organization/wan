@@ -3,11 +3,11 @@
 One call wires up JSON logs carrying the active trace id, OTLP traces for Tempo,
 Prometheus metrics, health probes and a Scalar API reference::
 
-    import fastapi_loki_tempo
+    import wan
     from fastapi import FastAPI
 
     app = FastAPI()
-    fastapi_loki_tempo.patch(app=app)
+    wan.patch(app=app)
 """
 
 __version__ = '0.1.0'
@@ -18,9 +18,9 @@ from typing import Any, Dict, Iterable, Optional
 from fastapi import Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from fastapi_loki_tempo import propagation
-from fastapi_loki_tempo import scalar as scalar_module
-from fastapi_loki_tempo.context import (
+from wan import propagation
+from wan import scalar as scalar_module
+from wan.context import (
     EMPTY_VALUE,
     correlation_headers,
     get_correlation_id,
@@ -29,17 +29,17 @@ from fastapi_loki_tempo.context import (
     set_correlation_id,
     trace_context,
 )
-from fastapi_loki_tempo.logs import (
+from wan.logs import (
     REQUEST_LOGGER_NAME,
     TYPE_LOG,
     TYPE_REQUEST,
     JsonLogFormatter,
     setup_logging,
 )
-from fastapi_loki_tempo.middleware import RequestLoggingMiddleware
-from fastapi_loki_tempo.propagation import CorrelationIdPropagator
-from fastapi_loki_tempo.os_env import *  # noqa: F401,F403  (env-derived defaults)
-from fastapi_loki_tempo.tracing import flush, setup_tracing
+from wan.middleware import RequestLoggingMiddleware
+from wan.propagation import CorrelationIdPropagator
+from wan.os_env import *  # noqa: F401,F403  (env-derived defaults)
+from wan.tracing import flush, setup_tracing
 
 __all__ = [
     '__version__',
@@ -92,6 +92,7 @@ def patch(
     log_max_msg_length: int = LOG_MAX_MSG_LENGTH,  # noqa: F405
     log_static_fields: Optional[Dict[str, Any]] = None,
     enable_request_log: bool = ENABLE_REQUEST_LOG,  # noqa: F405
+    capture_warnings: bool = CAPTURE_WARNINGS,  # noqa: F405
     log_exclude_urls: Iterable[str] = LOG_EXCLUDE_URLS,  # noqa: F405
     correlation_id_headers: Iterable[str] = CORRELATION_ID_HEADERS,  # noqa: F405
     correlation_id_header: str = CORRELATION_ID_HEADER,  # noqa: F405
@@ -145,9 +146,9 @@ def patch(
     dict with the configured `tracer_provider` and `formatter`, for tests and for
     callers that want to add their own exporters.
     """
-    if getattr(app.state, 'fastapi_loki_tempo', None) is not None:
-        logger.warning('fastapi_loki_tempo.patch() already applied to this app, skipping')
-        return app.state.fastapi_loki_tempo
+    if getattr(app.state, 'wan', None) is not None:
+        logger.warning('wan.patch() already applied to this app, skipping')
+        return app.state.wan
 
     if not 0 < tracing_sample <= 1:
         raise ValueError('`tracing_sample` must, 0 < `tracing_sample` <= 1')
@@ -167,6 +168,7 @@ def patch(
         max_msg_length=log_max_msg_length,
         static_fields=log_static_fields,
         silence_access_logs=enable_request_log,
+        capture_warnings=capture_warnings,
     )
 
     # Added before the OpenTelemetry middleware on purpose. Starlette treats the
@@ -256,10 +258,10 @@ def patch(
         'scalar_doc_endpoint': scalar_doc_endpoint if enable_scalar_doc else None,
         'metrics_endpoint': metrics_endpoint if enable_prometheus_metrics else None,
     }
-    app.state.fastapi_loki_tempo = state
+    app.state.wan = state
 
     logger.info({
-        'message': 'fastapi_loki_tempo patched',
+        'message': 'wan patched',
         'service_name': service_name,
         'otlp_endpoint': otlp_endpoint,
         'tracing_sample': tracing_sample,
@@ -275,7 +277,7 @@ def _instrument_optional(module_path: str, class_name: str, tracer_provider, ext
     except ImportError:
         logger.warning(
             f'{module_path} not installed, skipping. '
-            f"install with: pip install 'fastapi-loki-tempo[{extra}]'"
+            f"install with: pip install 'wan[{extra}]'"
         )
         return
     getattr(module, class_name)().instrument(tracer_provider=tracer_provider)

@@ -46,7 +46,7 @@ DEFAULT_PORTS = {
     'PROMETHEUS_PORT': '9090',
     'ALLOY_PORT': '12345',
 }
-SERVICE_NAME = 'fastapi-loki-tempo'
+SERVICE_NAME = 'wan'
 GRAFANA_AUTH = ('admin', 'admin')
 
 #: Stands in for an id minted by an upstream service, to prove it is reused and
@@ -565,9 +565,9 @@ def main():
     def dashboard_provisioned():
         results = get_json(f'{GRAFANA}/api/search?type=dash-db', auth=GRAFANA_AUTH)
         uids = [d['uid'] for d in results]
-        assert_that('fastapi-loki-tempo' in uids, f'dashboard missing, found {uids}')
+        assert_that('wan' in uids, f'dashboard missing, found {uids}')
         dashboard = get_json(
-            f'{GRAFANA}/api/dashboards/uid/fastapi-loki-tempo', auth=GRAFANA_AUTH)
+            f'{GRAFANA}/api/dashboards/uid/wan', auth=GRAFANA_AUTH)
         panels = dashboard['dashboard']['panels']
         return f'{len(panels)} panels'
     check('dashboard is provisioned', dashboard_provisioned)
@@ -638,7 +638,7 @@ def main():
                 print(f'  {RED}FAIL{RESET} {name}: {detail}')
         return 1
     print(f'{GREEN}all {passed} checks passed{RESET}')
-    print(f'\nDashboard: {GRAFANA}/d/fastapi-loki-tempo')
+    print(f'\nDashboard: {GRAFANA}/d/wan')
     print(f'Scalar:    {APP}/scalar')
     print(f'\nDeep links for the trace above:  python3 scripts/links.py --trace {trace_id}')
     return 0

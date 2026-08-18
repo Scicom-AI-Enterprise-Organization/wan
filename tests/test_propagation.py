@@ -6,9 +6,9 @@ hop, and composing our propagator in must not break trace propagation itself.
 
 from opentelemetry.propagate import get_global_textmap, inject
 
-import fastapi_loki_tempo
-from fastapi_loki_tempo.context import reset_correlation_id, set_correlation_id
-from fastapi_loki_tempo.propagation import CorrelationIdPropagator
+import wan
+from wan.context import reset_correlation_id, set_correlation_id
+from wan.propagation import CorrelationIdPropagator
 
 HEADER = 'X-Correlation-ID'
 
@@ -71,7 +71,7 @@ def test_propagation_can_be_disabled(make_app):
     app, _ = make_app(enable_correlation_id_propagation=False)
     # Already installed by another test in this process, so only assert the flag is
     # accepted and the app still patches cleanly.
-    assert app.state.fastapi_loki_tempo['version'] == fastapi_loki_tempo.__version__
+    assert app.state.wan['version'] == wan.__version__
 
 
 def test_inbound_id_is_what_gets_propagated_onward(client):

@@ -16,7 +16,7 @@ import traceback
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
-from fastapi_loki_tempo.context import get_correlation_id, trace_context
+from wan.context import get_correlation_id, trace_context
 
 TYPE_LOG = 'log'
 TYPE_REQUEST = 'request'
@@ -24,7 +24,7 @@ TYPE_REQUEST = 'request'
 REQUEST_LOGGER_NAME = 'fastapi-request-logger'
 
 #: Attribute the request middleware hangs its pre-built log object off of.
-REQUEST_LOG_ATTR = '_fastapi_loki_tempo_request'
+REQUEST_LOG_ATTR = '_wan_request'
 
 #: Everything the stdlib puts on a LogRecord. Attributes outside this set came
 #: from ``logger.info(..., extra={...})`` and are merged into the log object.
@@ -218,6 +218,7 @@ def setup_logging(
     max_msg_length: int = 0,
     static_fields: Optional[Dict[str, Any]] = None,
     silence_access_logs: bool = True,
+    capture_warnings: bool = True,
     reroute_loggers: Iterable[str] = _LOGGERS_TO_REROUTE,
 ) -> JsonLogFormatter:
     """Point the root logger at a JSON handler and make uvicorn use it too.
@@ -253,6 +254,12 @@ def setup_logging(
         logger = logging.getLogger(name)
         logger.handlers = []
         logger.propagate = True
+
+    if capture_warnings:
+        # warnings.warn() writes straight to stderr, bypassing logging entirely, so a
+        # DeprecationWarning would be the one plain-text line Loki cannot parse.
+        # This routes them through the py.warnings logger and out as JSON.
+        logging.captureWarnings(True)
 
     for name in _ACCESS_LOGGERS:
         logger = logging.getLogger(name)

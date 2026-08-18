@@ -12,14 +12,14 @@ import sys
 import time
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from fastapi_loki_tempo.context import (
+from wan.context import (
     EMPTY_VALUE,
     get_trace_ids,
     new_correlation_id,
     reset_correlation_id,
     set_correlation_id,
 )
-from fastapi_loki_tempo.logs import (
+from wan.logs import (
     REQUEST_LOG_ATTR,
     REQUEST_LOGGER_NAME,
     TYPE_REQUEST,

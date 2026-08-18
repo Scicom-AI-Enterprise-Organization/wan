@@ -66,7 +66,11 @@ def main():
     parser.add_argument('--trace', help='trace id; default is the newest in Tempo')
     parser.add_argument('--correlation', help='correlation id to filter logs by')
     parser.add_argument('--service', help='restrict trace discovery/search to a service')
+    parser.add_argument('--grafana', default=GRAFANA,
+                        help='Grafana base URL to build links against, e.g. '
+                             'http://192.168.1.10:3010 for links you can send someone')
     args = parser.parse_args()
+    grafana = args.grafana.rstrip('/')
 
     trace_id = args.trace or newest_trace(args.service)
     if not trace_id:
@@ -80,17 +84,17 @@ def main():
     )
 
     links = [
-        ('Tempo, this trace', explore_url({'tr': tempo_pane(trace_id)})),
-        ('Loki, its logs', explore_url({'lg': loki_pane(log_filter)})),
+        ('Tempo, this trace', explore_url({'tr': tempo_pane(trace_id)}, grafana)),
+        ('Loki, its logs', explore_url({'lg': loki_pane(log_filter)}, grafana)),
         ('Loki + Tempo side by side',
-         explore_url({'lg': loki_pane(log_filter), 'tr': tempo_pane(trace_id)})),
+         explore_url({'lg': loki_pane(log_filter), 'tr': tempo_pane(trace_id)}, grafana)),
         ('Tempo, TraceQL search',
          explore_url({'sr': tempo_pane(
              f'{{resource.service.name="{args.service}"}}' if args.service else '{}',
-             limit=20, tableType='traces')})),
+             limit=20, tableType='traces')}, grafana)),
         ('Tempo, service graph',
-         explore_url({'sg': tempo_pane('', query_type='serviceMap')})),
-        ('Dashboard', f'{GRAFANA}/d/fastapi-loki-tempo?from=now-1h&to=now'),
+         explore_url({'sg': tempo_pane('', query_type='serviceMap')}, grafana)),
+        ('Dashboard', f'{grafana}/d/wan?from=now-1h&to=now'),
     ]
 
     print(f'trace id       : {trace_id}')

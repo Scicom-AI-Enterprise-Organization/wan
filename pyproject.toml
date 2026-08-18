@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "fastapi-loki-tempo"
+name = "wan"
 description = "FastAPI boilerplate for Loki and Tempo."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -26,8 +26,8 @@ classifiers = [
 dynamic = ["version", "dependencies"]
 
 [project.urls]
-Homepage = "https://github.com/Scicom-AI-Enterprise-Organization/fastapi-loki-tempo"
-Source = "https://github.com/Scicom-AI-Enterprise-Organization/fastapi-loki-tempo"
+Homepage = "https://github.com/Scicom-AI-Enterprise-Organization/wan"
+Source = "https://github.com/Scicom-AI-Enterprise-Organization/wan"
 
 [project.optional-dependencies]
 # Deprecated upstream since OpenTelemetry 1.16; only for legacy Jaeger agents.
@@ -44,16 +44,18 @@ dev = [
 ]
 
 [tool.setuptools.dynamic]
-version = { attr = "fastapi_loki_tempo.__version__" }
+version = { attr = "wan.__version__" }
 dependencies = { file = ["requirements.txt"] }
 
 [tool.setuptools.packages.find]
-include = ["fastapi_loki_tempo*"]
+include = ["wan*"]
 
 [tool.setuptools.package-data]
 # Ships the inline type hints to downstream type checkers (PEP 561).
-fastapi_loki_tempo = ["py.typed"]
+wan = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 filterwarnings = ["ignore::DeprecationWarning"]

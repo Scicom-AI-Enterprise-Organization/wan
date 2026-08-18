@@ -1,6 +1,6 @@
 """Automatic correlation id propagation on outbound calls.
 
-Inbound is handled by :class:`~fastapi_loki_tempo.middleware.RequestLoggingMiddleware`,
+Inbound is handled by :class:`~wan.middleware.RequestLoggingMiddleware`,
 which reuses an incoming correlation id header instead of minting a new one. This
 module covers the other half: putting that same id back on every call this service
 makes, so one id spans A -> B -> C without any per-call code.
@@ -27,7 +27,7 @@ from opentelemetry.propagators.textmap import (
     default_setter,
 )
 
-from fastapi_loki_tempo.context import get_correlation_id
+from wan.context import get_correlation_id
 
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from fastapi_loki_tempo.logs import JsonLogFormatter, epoch_nano, iso_time
+from wan.logs import JsonLogFormatter, epoch_nano, iso_time
 
 # Exactly the keys the README documents for a `type=log` line, in order.
 REFERENCE_LOG_KEYS = [

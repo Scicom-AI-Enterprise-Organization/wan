@@ -1,7 +1,7 @@
 apiVersion: 1
 
 providers:
-  - name: fastapi-loki-tempo
+  - name: wan
     orgId: 1
     folder: ""
     type: file

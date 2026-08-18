@@ -6,7 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import fastapi_loki_tempo
+import wan
 
 
 class LogCapture:
@@ -44,7 +44,7 @@ def make_app():
             'log_stdout': False,
         }
         kwargs.update(patch_kwargs)
-        state = fastapi_loki_tempo.patch(app=app, **kwargs)
+        state = wan.patch(app=app, **kwargs)
 
         stream = io.StringIO()
         handler = logging.StreamHandler(stream)

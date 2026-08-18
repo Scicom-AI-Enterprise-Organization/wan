@@ -17,7 +17,7 @@ up: ## build and start the full stack
 	@echo
 	@echo "app     http://localhost:$$(grep '^APP_PORT' grafana/.env | cut -d= -f2)"
 	@echo "scalar  http://localhost:$$(grep '^APP_PORT' grafana/.env | cut -d= -f2)/scalar"
-	@echo "grafana http://localhost:$$(grep '^GRAFANA_PORT' grafana/.env | cut -d= -f2)/d/fastapi-loki-tempo"
+	@echo "grafana http://localhost:$$(grep '^GRAFANA_PORT' grafana/.env | cut -d= -f2)/d/wan"
 
 down: ## stop the stack and delete its volumes
 	$(COMPOSE) down -v

@@ -1,7 +1,7 @@
 {
-  "uid": "fastapi-loki-tempo",
-  "title": "FastAPI · Loki · Tempo",
-  "description": "Logs, traces and metrics for a FastAPI service patched with fastapi-loki-tempo. Click the 'View trace' link on any log line to jump to Tempo.",
+  "uid": "wan",
+  "title": "wan · logs, traces and metrics",
+  "description": "Logs, traces and metrics for a FastAPI service patched with wan. Click the 'View trace' link on any log line to jump to Tempo.",
   "tags": ["fastapi", "loki", "tempo", "opentelemetry"],
   "timezone": "browser",
   "editable": true,
@@ -232,7 +232,7 @@
         {
           "refId": "A",
           "queryType": "traceql",
-          "query": "{resource.service.name=\"fastapi-loki-tempo\"}",
+          "query": "{resource.service.name=\"wan\"}",
           "tableType": "traces",
           "limit": 20
         }

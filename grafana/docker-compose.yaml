@@ -3,7 +3,11 @@
 #
 # Host ports come from grafana/.env so this can coexist with another stack on the
 # same machine. Defaults below are the canonical ones.
-name: fastapi-loki-tempo
+#
+# Ports publish on ${BIND_HOST}, default 0.0.0.0 -- reachable from any machine that
+# can route to this host. Grafana here runs with anonymous access enabled, so on an
+# untrusted network set BIND_HOST=127.0.0.1 or turn anonymous auth off.
+name: wan
 
 services:
   app:
@@ -14,7 +18,7 @@ services:
       # Read by Alloy's docker discovery and turned into the Loki `job` label.
       logs.job: fastapi
     environment:
-      SERVICE_NAME: ${SERVICE_NAME:-fastapi-loki-tempo}
+      SERVICE_NAME: ${SERVICE_NAME:-wan}
       SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
       DEPLOYMENT_ENVIRONMENT: local
       OTLP_ENDPOINT: http://tempo:4317
@@ -25,7 +29,7 @@ services:
       # /chain calls back through the compose network to show trace propagation.
       DOWNSTREAM_URL: http://app:8000
     ports:
-      - "${APP_PORT:-7072}:8000"
+      - "${BIND_HOST:-0.0.0.0}:${APP_PORT:-7072}:8000"
     depends_on:
       - tempo
     restart: unless-stopped
@@ -49,7 +53,7 @@ services:
       ENABLE_HTTPX_INSTRUMENTATION: "true"
       DOWNSTREAM_URL: http://service-b:8000
     ports:
-      - "${SERVICE_A_PORT:-7080}:8000"
+      - "${BIND_HOST:-0.0.0.0}:${SERVICE_A_PORT:-7080}:8000"
     depends_on:
       - tempo
     restart: unless-stopped
@@ -71,7 +75,7 @@ services:
       # B is the leaf; call it with ?depth=0 so it does not hop further.
       DOWNSTREAM_URL: http://service-b:8000
     ports:
-      - "${SERVICE_B_PORT:-7081}:8000"
+      - "${BIND_HOST:-0.0.0.0}:${SERVICE_B_PORT:-7081}:8000"
     depends_on:
       - tempo
     restart: unless-stopped
@@ -85,10 +89,10 @@ services:
       # 10001, and docker preserves that ownership only for named volumes.
       - tempo-data:/var/tempo
     ports:
-      - "${TEMPO_PORT:-3200}:3200"                       # HTTP API + TraceQL
-      - "${TEMPO_OTLP_GRPC_PORT:-4317}:4317"             # OTLP gRPC
-      - "${TEMPO_OTLP_HTTP_PORT:-4318}:4318"             # OTLP HTTP
-      - "${TEMPO_JAEGER_COMPACT_PORT:-6831}:6831/udp"    # legacy jaeger thrift
+      - "${BIND_HOST:-0.0.0.0}:${TEMPO_PORT:-3200}:3200"                       # HTTP API + TraceQL
+      - "${BIND_HOST:-0.0.0.0}:${TEMPO_OTLP_GRPC_PORT:-4317}:4317"             # OTLP gRPC
+      - "${BIND_HOST:-0.0.0.0}:${TEMPO_OTLP_HTTP_PORT:-4318}:4318"             # OTLP HTTP
+      - "${BIND_HOST:-0.0.0.0}:${TEMPO_JAEGER_COMPACT_PORT:-6831}:6831/udp"    # legacy jaeger thrift
     restart: unless-stopped
 
   loki:
@@ -98,7 +102,7 @@ services:
       - ./loki.yaml:/etc/loki/loki.yaml:ro
       - loki-data:/loki
     ports:
-      - "${LOKI_PORT:-3100}:3100"
+      - "${BIND_HOST:-0.0.0.0}:${LOKI_PORT:-3100}:3100"
     restart: unless-stopped
 
   alloy:
@@ -117,7 +121,7 @@ services:
       - ./logs:/host-logs
       - alloy-data:/var/lib/alloy/data
     ports:
-      - "${ALLOY_PORT:-12345}:12345"
+      - "${BIND_HOST:-0.0.0.0}:${ALLOY_PORT:-12345}:12345"
     depends_on:
       - loki
     restart: unless-stopped
@@ -136,7 +140,7 @@ services:
       - ./prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
       - prometheus-data:/prometheus
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "${BIND_HOST:-0.0.0.0}:${PROMETHEUS_PORT:-9090}:9090"
     restart: unless-stopped
 
   grafana:
@@ -150,6 +154,9 @@ services:
       GF_USERS_VIEWERS_CAN_EDIT: "true"
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # Share links and alert notifications are built from this. Set
+      # GRAFANA_ROOT_URL to the address other people actually reach it on.
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:${GRAFANA_PORT:-3000}/}
       GF_FEATURE_TOGGLES_ENABLE: traceqlEditor traceQLStreaming metricsSummary
       GF_USERS_DEFAULT_THEME: dark
       GF_LOG_LEVEL: warn
@@ -157,7 +164,7 @@ services:
       - ./provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana
     ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+      - "${BIND_HOST:-0.0.0.0}:${GRAFANA_PORT:-3000}:3000"
     depends_on:
       - loki
       - tempo

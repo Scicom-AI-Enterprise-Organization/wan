@@ -8,7 +8,7 @@ scrape_configs:
     static_configs:
       - targets: ["app:8000"]
         labels:
-          service: fastapi-loki-tempo
+          service: wan
 
   - job_name: tempo
     static_configs:

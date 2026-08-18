@@ -6,7 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import fastapi_loki_tempo
+import wan
 from tests.test_logs import REFERENCE_REQUEST_KEYS
 
 HEX32 = re.compile(r'^[0-9a-f]{32}$')
@@ -127,7 +127,7 @@ def test_scalar_page_is_served(client):
     assert '/openapi.json' in response.text
     assert 'createApiReference' in response.text
     # Pinned, not @latest: an upstream release must not break deployed docs.
-    assert f'@scalar/api-reference@{fastapi_loki_tempo.scalar.SCALAR_VERSION}' in response.text
+    assert f'@scalar/api-reference@{wan.scalar.SCALAR_VERSION}' in response.text
 
 
 def test_scalar_can_be_disabled(make_app):
@@ -154,14 +154,14 @@ def test_request_log_can_be_disabled(make_app):
 
 def test_invalid_tracing_sample_is_rejected():
     with pytest.raises(ValueError, match='tracing_sample'):
-        fastapi_loki_tempo.patch(app=FastAPI(), tracing_sample=0)
+        wan.patch(app=FastAPI(), tracing_sample=0)
     with pytest.raises(ValueError, match='tracing_sample'):
-        fastapi_loki_tempo.patch(app=FastAPI(), tracing_sample=1.5)
+        wan.patch(app=FastAPI(), tracing_sample=1.5)
 
 
 def test_otlp_and_jaeger_together_is_rejected():
     with pytest.raises(ValueError, match='same time'):
-        fastapi_loki_tempo.patch(
+        wan.patch(
             app=FastAPI(), otlp_endpoint='http://localhost:4317', jaeger_host='localhost',
         )
 
@@ -169,9 +169,9 @@ def test_otlp_and_jaeger_together_is_rejected():
 def test_patching_twice_is_a_no_op(make_app):
     app, _ = make_app()
     before = len(app.user_middleware)
-    fastapi_loki_tempo.patch(app=app)
+    wan.patch(app=app)
     assert len(app.user_middleware) == before
 
 
 def test_correlation_headers_helper_is_empty_outside_a_request():
-    assert fastapi_loki_tempo.correlation_headers() == {}
+    assert wan.correlation_headers() == {}

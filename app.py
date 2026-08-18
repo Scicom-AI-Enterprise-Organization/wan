@@ -14,14 +14,14 @@ import random
 from fastapi import FastAPI, HTTPException, Request
 from opentelemetry import trace
 
-import fastapi_loki_tempo
+import wan
 
 app = FastAPI(
-    title='fastapi-loki-tempo',
+    title='wan',
     description='FastAPI boilerplate for Loki and Tempo.',
-    version=fastapi_loki_tempo.__version__,
+    version=wan.__version__,
 )
-fastapi_loki_tempo.patch(app=app)
+wan.patch(app=app)
 
 tracer = trace.get_tracer(__name__)
 

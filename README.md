@@ -1,17 +1,23 @@
-# fastapi-loki-tempo
+# wan
 
-FastAPI boilerplate for Loki and Tempo.
+**FastAPI observability boilerplate — correlated logs, traces and metrics in one call.**
 
-Loki and Tempo are a very useful open source stack to combine logging + tracing. One
-call wires up both, plus metrics, health probes and API docs:
+Loki and Tempo are a very useful open source stack for combining logging with tracing,
+but wiring them together correctly is fiddly and easy to get subtly wrong. `wan` does it
+for you: every log line carries the trace id of the request that produced it, and one
+correlation id follows a request across every service it touches.
 
 ```python
-import fastapi_loki_tempo
+import wan
 from fastapi import FastAPI
 
 app = FastAPI()
-fastapi_loki_tempo.patch(app=app)
+wan.patch(app=app)
 ```
+
+That single call gives the service JSON logs, OpenTelemetry traces exported to Tempo,
+Prometheus metrics, health probes and a Scalar API reference. Everything is configurable
+by environment variable, so the same image runs unchanged from laptop to production.
 
 <img src="docs/grafana-dashboard.png" width="900px">
 
@@ -40,20 +46,49 @@ too) and `request_route`.
 
 ## Installation
 
+Installed straight from git; this is not published to PyPI.
+
 ```bash
-pip3 install git+https://github.com/Scicom-AI-Enterprise-Organization/fastapi-loki-tempo
+pip3 install git+https://github.com/Scicom-AI-Enterprise-Organization/wan
 ```
+
+Pin a tag or commit for anything you deploy — a bare git URL tracks the default branch,
+so a colleague's merge changes what your next build installs:
+
+```bash
+pip3 install 'wan @ git+https://github.com/Scicom-AI-Enterprise-Organization/wan@v0.1.0'
+```
+
+In a `requirements.txt`:
+
+```
+wan @ git+https://github.com/Scicom-AI-Enterprise-Organization/wan@v0.1.0
+```
+
+Optional extras use PEP 508 direct-reference syntax, since there is no package index to
+resolve `wan[extra]` against:
+
+```bash
+pip3 install 'wan[httpx] @ git+https://github.com/Scicom-AI-Enterprise-Organization/wan'
+```
+
+| Extra | Adds |
+|---|---|
+| `httpx` | tracing for outbound `httpx` calls, and correlation id propagation with them |
+| `requests` | the same for `requests` |
+| `jaeger` | the deprecated Jaeger thrift exporter |
+| `dev` | pytest and the test dependencies |
 
 ## How to
 
 Simple as,
 
 ```python
-import fastapi_loki_tempo
+import wan
 from fastapi import Request, FastAPI
 
 app = FastAPI()
-fastapi_loki_tempo.patch(app=app)
+wan.patch(app=app)
 ```
 
 `patch` then gives the app:
@@ -82,7 +117,7 @@ def patch(
     enable_prometheus_metrics: bool = ENABLE_PROMETHEUS_METRICS,
     enable_scalar_doc: bool = ENABLE_SCALAR_DOC,
     scalar_doc_endpoint: str = SCALAR_DOC_ENDPOINT,
-    # ... see fastapi_loki_tempo/os_env.py for the full list
+    # ... see wan/os_env.py for the full list
 )
 ```
 
@@ -112,6 +147,7 @@ uvicorn app:app --reload --host 0.0.0.0 --port 7072
 | `LOG_FILE` | – | Also write to this rotating file, for file-tailing agents |
 | `LOG_MAX_MSG_LENGTH` | `0` | Truncate `msg` above this length (0 = never) |
 | `ENABLE_REQUEST_LOG` | `true` | Emit `type=request` lines |
+| `CAPTURE_WARNINGS` | `true` | Route `warnings.warn()` through logging so it is JSON too |
 | `LOG_EXCLUDE_URLS` | `/healthz,/livez,/readyz,/metrics` | Path prefixes not to request-log |
 | `CORRELATION_ID_HEADERS` | `x-correlation-id,correlation-id,x-request-id,request-id` | Inbound headers to reuse as the correlation id |
 | `CORRELATION_ID_HEADER` | `X-Correlation-ID` | Header written on responses and on outbound calls |
@@ -127,6 +163,68 @@ uvicorn app:app --reload --host 0.0.0.0 --port 7072
 | `ENABLE_HTTPX_INSTRUMENTATION` | `false` | Trace outbound `httpx` calls (needs the `httpx` extra) |
 | `ENABLE_REQUESTS_INSTRUMENTATION` | `false` | Trace outbound `requests` calls (needs the `requests` extra) |
 | `JAEGER_HOST` / `JAEGER_PORT` | – / `6831` | Deprecated, see below |
+
+### Using it from your own modules
+
+Nothing to import. `patch()` installs the JSON handler on the **root** logger, and any
+logger made the usual way propagates to it:
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)   # at module scope, as normal
+
+def charge(amount):
+    logger.info(f'charging {amount}')          # JSON, with the request's trace id
+    logger.warning('large charge')
+    logger.exception('charge failed')          # traceback included, still correlated
+```
+
+The trace id is resolved when the line is formatted, not when the logger is created, so
+this works regardless of import order -- a module imported before `patch()` runs is fine.
+`logger`, `module` and `line_no` report the real call site:
+
+```json
+{"msg": "charging 150", "type": "log", "logger": "billing.service", "level": "INFO",
+ "module": "service", "line_no": 8, "correlation_id": "50b24274-...",
+ "traceID": "1ae8303987e6118b316779da6f4e2eeb", "spanID": "e030b51293bcc1b1", ...}
+```
+
+Because `logger` is the dotted module path rather than `root`, it is worth filtering on.
+Alloy attaches it as structured metadata:
+
+```logql
+{job="fastapi"} | logger="billing.service" | level="ERROR"
+```
+
+As many loggers as you like, including hierarchies — trace context is resolved per
+*record*, not per logger, so it does not matter how many you have or when you made them:
+
+```python
+log1 = logging.getLogger('log1')
+log2 = logging.getLogger('log2')
+pool = logging.getLogger('app.db.pool')
+```
+
+All three emit the same `traceID` and `correlation_id` within one request, and stay
+correct under concurrency because the correlation id lives in a `ContextVar` — each
+request (and each task spawned from it) gets its own copy. Verified with 12 interleaved
+requests × 4 loggers: 48 lines, zero stamped with a neighbour's id, 12 distinct traces.
+Records also emit exactly once despite propagating through `app.db` and `app` on the way
+to root, since only root carries a handler.
+
+Two things that trip people up:
+
+- **A child logger's own level wins.** Propagation consults *handler* levels, not
+  ancestor *logger* levels, so `logging.getLogger(__name__).setLevel(logging.DEBUG)`
+  emits DEBUG even while `LOGLEVEL=INFO`. Handy for turning up one module; surprising if
+  you expected root to filter it.
+- **`logger.propagate = False` or your own handler opts out.** Records then never reach
+  the JSON handler and you get plain text. Don't add handlers to your own loggers.
+
+`warnings.warn()` bypasses `logging` altogether and would be the one plain-text line
+Loki cannot parse, so `patch()` enables `logging.captureWarnings(True)`; warnings arrive
+as JSON under the `py.warnings` logger. Disable with `CAPTURE_WARNINGS=false`.
 
 ### Correlation ids across services
 
@@ -156,26 +254,26 @@ async with httpx.AsyncClient() as client:
 ```
 
 That works through an OpenTelemetry `TextMapPropagator`
-(`fastapi_loki_tempo/propagation.py`) composed onto the global propagator, which is what
+(`wan/propagation.py`) composed onto the global propagator, which is what
 every OpenTelemetry HTTP instrumentation injects into its outbound headers. So it covers
 httpx, requests, aiohttp, urllib and grpc alike instead of needing an integration per
 client library. The value is read from the request context at the moment of the call, so
 it is always the current request's id.
 
 **It requires the client to be instrumented.** Set `ENABLE_HTTPX_INSTRUMENTATION=true`
-or `ENABLE_REQUESTS_INSTRUMENTATION=true` (the `httpx` / `requests` extras). For a client
+or `ENABLE_REQUESTS_INSTRUMENTATION=true` (the `httpx` / `requests` extras above). For a client
 that is not instrumented, pass the header yourself:
 
 ```python
-async with httpx.AsyncClient(headers=fastapi_loki_tempo.correlation_headers()) as client:
+async with httpx.AsyncClient(headers=wan.correlation_headers()) as client:
     ...
 ```
 
 Reading the current ids anywhere in a request:
 
 ```python
-trace_id, span_id, dd_trace_id = fastapi_loki_tempo.get_trace_ids()
-correlation_id = fastapi_loki_tempo.get_correlation_id()
+trace_id, span_id, dd_trace_id = wan.get_trace_ids()
+correlation_id = wan.get_correlation_id()
 ```
 
 Then in Loki, one id gives you every service's logs for that request:
@@ -213,7 +311,7 @@ docker compose -f grafana/docker-compose.yaml up -d --build
 |---|---|
 | App | http://localhost:7072 |
 | Scalar docs | http://localhost:7072/scalar |
-| Grafana | http://localhost:3010/d/fastapi-loki-tempo |
+| Grafana | http://localhost:3010/d/wan |
 | Loki | http://localhost:3110 |
 | Tempo | http://localhost:3210 |
 | Prometheus | http://localhost:9092 |
@@ -222,6 +320,37 @@ docker compose -f grafana/docker-compose.yaml up -d --build
 Ports live in `grafana/.env`. They are shifted off the canonical
 3000/3100/3200/4317/9090 so this stack can run next to another Grafana stack on the
 same machine; delete that file to use the defaults.
+
+#### Reaching it from another machine
+
+Ports publish on `BIND_HOST`, which defaults to `0.0.0.0`, so Grafana is already
+reachable on this host's LAN or VPN address — no change needed:
+
+```
+http://192.168.88.102:3010/d/wan
+```
+
+Two things to set when you do share it:
+
+- **`GRAFANA_ROOT_URL`** — Grafana builds share links and alert notification links from
+  its `root_url`. Left at `localhost` it hands out URLs that only work on this machine.
+  Point it at the address people actually use:
+  `GRAFANA_ROOT_URL=http://192.168.88.102:3010/`
+- **Anonymous access is on.** `GF_AUTH_ANONYMOUS_ENABLED=true` means anyone who can
+  route to the port can read every dashboard and query every datasource, with no login.
+  Fine on a trusted network, not on an untrusted one. Either set
+  `BIND_HOST=127.0.0.1` to keep it local, or turn anonymous auth off and use
+  `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD`.
+
+Note this publishes Loki, Tempo and Prometheus too, none of which have any
+authentication (`auth_enabled: false`). If you only want Grafana exposed, set
+`BIND_HOST=127.0.0.1` and give Grafana alone a `"0.0.0.0:${GRAFANA_PORT}:3000"` mapping.
+
+To generate links against the shareable address:
+
+```bash
+python3 scripts/links.py --grafana http://192.168.88.102:3010
+```
 
 2. Request the API,
 
@@ -359,7 +488,7 @@ whole chain: that every log line is valid JSON with a well formed trace id, that
 trace id from a log line resolves in Tempo, that the same id finds those logs back in
 Loki, that Scalar serves and its bundle is pinned and reachable, that Prometheus
 scrapes the app and receives Tempo's generated span metrics, and that Grafana can run
-each dashboard query through its own datasource proxy. 38 checks.
+each dashboard query through its own datasource proxy. 40 checks.
 
 ```
 == loki (logs) ==
@@ -368,7 +497,7 @@ PASS  Tempo -> Loki: trace id finds its log lines            (Tempo -> Loki link
 PASS  Loki -> Tempo: derived field regex matches the raw line 48 lines match traceID=(\w+)
 PASS  traceID is structured metadata, not a label            traceID is not a label
 ...
-all 38 checks passed
+all 40 checks passed
 ```
 
 Unit tests:
@@ -410,7 +539,7 @@ upstream in OpenTelemetry 1.16 and is not installed by default. Tempo ingests OT
 natively, so prefer `otlp_endpoint`. If you need it:
 
 ```bash
-pip install 'fastapi-loki-tempo[jaeger]'
+pip3 install 'wan[jaeger] @ git+https://github.com/Scicom-AI-Enterprise-Organization/wan'
 JAEGER_HOST=localhost JAEGER_PORT=6841 uvicorn app:app --port 7072
 ```
 
@@ -442,7 +571,7 @@ This is a rewrite of [huseinzol05/fastapi-loki-tempo](https://github.com/huseinz
 replacement. Behaviour that was wrong or missing before:
 
 - **Loki, Grafana and Prometheus were not in the stack at all.** `grafana/docker-compose.yaml`
-  only ran Tempo and a Jaeger UI, so nothing in a repo called `fastapi-loki-tempo`
+  only ran Tempo and a Jaeger UI, so nothing in a repo called `wan`
   actually shipped a log to Loki. Now Loki, Alloy, Prometheus and Grafana are all
   there, with datasources, derived fields and a dashboard provisioned.
 - **Trace ids were not zero padded.** `hex(trace_id)[2:]` drops leading zeros, so

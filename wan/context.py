@@ -14,7 +14,7 @@ from opentelemetry import trace
 EMPTY_VALUE = '-'
 
 _correlation_id: ContextVar[Optional[str]] = ContextVar(
-    'fastapi_loki_tempo_correlation_id', default=None,
+    'wan_correlation_id', default=None,
 )
 
 

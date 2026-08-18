@@ -139,7 +139,7 @@ def setup_tracing(
                 'jaeger_host is set but the Jaeger exporter is not installed, and it '
                 'has been deprecated upstream since OpenTelemetry 1.16. Prefer '
                 "otlp_endpoint (Tempo accepts OTLP natively); or install "
-                "`pip install 'fastapi-loki-tempo[jaeger]'` to keep using it."
+                "`pip install 'wan[jaeger]'` to keep using it."
             ) from e
         exporters.append(JaegerExporter(
             agent_host_name=jaeger_host,

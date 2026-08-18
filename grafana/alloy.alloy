@@ -23,11 +23,11 @@ discovery.relabel "containers" {
   // its ingestion rate limit. Must match `name:` in docker-compose.yaml.
   rule {
     source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
-    regex         = "fastapi-loki-tempo"
+    regex         = "wan"
     action        = "keep"
   }
 
-  // "/fastapi-loki-tempo-app-1" -> "fastapi-loki-tempo-app-1"
+  // "/wan-app-1" -> "wan-app-1"
   rule {
     source_labels = ["__meta_docker_container_name"]
     regex         = "/?(.*)"

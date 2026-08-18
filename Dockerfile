@@ -13,7 +13,7 @@ RUN pip install -r requirements.txt \
     && pip install 'uvicorn[standard]>=0.23' 'httpx>=0.24' opentelemetry-instrumentation-httpx
 
 COPY pyproject.toml README.md ./
-COPY fastapi_loki_tempo ./fastapi_loki_tempo
+COPY wan ./wan
 RUN pip install --no-deps .
 
 COPY app.py ./

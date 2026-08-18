@@ -1,4 +1,4 @@
-"""Environment variable defaults for every :func:`fastapi_loki_tempo.patch` argument.
+"""Environment variable defaults for every :func:`wan.patch` argument.
 
 Every knob is readable from the environment so the same image can be deployed to
 local docker-compose, staging and production without a code change.
@@ -97,6 +97,8 @@ LOG_FILE_MAX_BYTES = env_int('LOG_FILE_MAX_BYTES', 64 * 1024 * 1024)
 LOG_FILE_BACKUP_COUNT = env_int('LOG_FILE_BACKUP_COUNT', 3)
 LOG_MAX_MSG_LENGTH = env_int('LOG_MAX_MSG_LENGTH', 0)
 ENABLE_REQUEST_LOG = env_bool('ENABLE_REQUEST_LOG', True)
+# Route warnings.warn() through logging so it comes out as JSON too.
+CAPTURE_WARNINGS = env_bool('CAPTURE_WARNINGS', True)
 LOG_EXCLUDE_URLS = env_list('LOG_EXCLUDE_URLS', '/healthz,/livez,/readyz,/metrics')
 # Inbound: any of these is reused as the correlation id, so an id created by the
 # first service in a chain survives every hop instead of each hop minting its own.
