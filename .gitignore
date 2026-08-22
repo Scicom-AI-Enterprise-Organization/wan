@@ -9,3 +9,5 @@ venv/
 std.log
 grafana/logs/*.log
 grafana/logs/*.log.*
+# Holds OTLP push credentials.
+.env

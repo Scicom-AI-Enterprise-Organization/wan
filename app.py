@@ -4,6 +4,11 @@ Run it, hit the endpoints, then correlate the logs and traces in Grafana:
 
     docker compose -f grafana/docker-compose.yaml up -d --build
     curl 'http://localhost:7072/random?minimum=0.1&maximum=2'
+
+Running it outside compose reads a `.env` next to this file, so a remote OTLP
+push (OTLP_ENDPOINT, OTLP_USERNAME, OTLP_PASSWORD) needs no exported variables:
+
+    uvicorn app:app --port 7072
 """
 
 import asyncio
@@ -11,10 +16,20 @@ import logging
 import os
 import random
 
-from fastapi import FastAPI, HTTPException, Request
-from opentelemetry import trace
+# Before `import wan`: every wan.patch() default is read from the environment when
+# wan is imported, so a .env loaded after that would be ignored. python-dotenv is
+# in the `example` extra only -- the library itself never reads a file.
+try:
+    from dotenv import load_dotenv
 
-import wan
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
+except ImportError:
+    pass
+
+from fastapi import FastAPI, HTTPException, Request  # noqa: E402
+from opentelemetry import trace  # noqa: E402
+
+import wan  # noqa: E402
 
 app = FastAPI(
     title='wan',

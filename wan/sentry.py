@@ -28,6 +28,8 @@ def build_before_send(
     grafana_url: Optional[str] = None,
     loki_selector: str = '{job="fastapi"}',
     dashboard_uid: str = 'wan',
+    logs_datasource: Optional[Dict[str, Any]] = None,
+    trace_datasource: Optional[Dict[str, Any]] = None,
 ) -> Callable:
     """An event processor that stamps the correlation and trace ids onto every event.
 
@@ -79,6 +81,8 @@ def build_before_send(
                     dashboard_uid=dashboard_uid,
                     correlation_id=correlation_id or None,
                     trace_id=trace_id,
+                    logs_datasource=logs_datasource,
+                    trace_datasource=trace_datasource,
                 )
                 if links:
                     # Two places, because Sentry renders them differently: a named
@@ -109,6 +113,8 @@ def setup_sentry(
     grafana_url: Optional[str] = None,
     loki_selector: str = '{job="fastapi"}',
     dashboard_uid: str = 'wan',
+    logs_datasource: Optional[Dict[str, Any]] = None,
+    trace_datasource: Optional[Dict[str, Any]] = None,
     ignore_loggers: tuple = (),
     tracer_provider=None,
     **init_kwargs,
@@ -163,6 +169,8 @@ def setup_sentry(
             grafana_url=grafana_url,
             loki_selector=loki_selector,
             dashboard_uid=dashboard_uid,
+            logs_datasource=logs_datasource,
+            trace_datasource=trace_datasource,
         ),
         'integrations': [
             LoggingIntegration(

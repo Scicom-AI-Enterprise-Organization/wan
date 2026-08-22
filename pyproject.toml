@@ -35,7 +35,7 @@ jaeger = ["opentelemetry-exporter-jaeger-thrift"]
 httpx = ["opentelemetry-instrumentation-httpx"]
 requests = ["opentelemetry-instrumentation-requests"]
 sentry = ["sentry-sdk>=2.0"]
-example = ["uvicorn[standard]>=0.23", "httpx>=0.24", "opentelemetry-instrumentation-httpx"]
+example = ["uvicorn[standard]>=0.23", "httpx>=0.24", "opentelemetry-instrumentation-httpx", "python-dotenv>=1.0"]
 dev = [
     "pytest>=7.4",
     "pytest-asyncio>=0.23",
@@ -43,6 +43,7 @@ dev = [
     "uvicorn[standard]>=0.23",
     "opentelemetry-instrumentation-httpx",
     "sentry-sdk>=2.0",
+    "python-dotenv>=1.0",
 ]
 
 [tool.setuptools.dynamic]

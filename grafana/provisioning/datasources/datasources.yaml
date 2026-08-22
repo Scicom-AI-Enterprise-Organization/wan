@@ -75,3 +75,23 @@ datasources:
       exemplarTraceIdDestinations:
         - name: trace_id
           datasourceUid: tempo
+
+  # Sentry, so an issue can be read next to the logs and traces of the same request.
+  # Needs the `grafana-sentry-datasource` plugin, installed by GF_INSTALL_PLUGINS on
+  # the grafana service. Unlike the rest of the stack this one is not self-contained:
+  # it talks to a Sentry, so it stays inert until the three variables below are set in
+  # grafana/.env. Grafana expands $VAR in provisioning files from its own environment.
+  #
+  # The token is NOT the DSN. A DSN's key only authorises *writing* events; reading
+  # them back needs an auth token from Sentry (User settings -> Auth Tokens, or an
+  # organisation token) with at least `project:read` and `event:read`.
+  - name: Sentry
+    type: grafana-sentry-datasource
+    uid: sentry
+    jsonData:
+      # Self-hosted Sentry on the docker host is http://host.docker.internal:9090 --
+      # `localhost` inside this container is Grafana itself.
+      url: ${SENTRY_GRAFANA_URL}
+      orgSlug: ${SENTRY_ORG_SLUG}
+    secureJsonData:
+      authToken: ${SENTRY_AUTH_TOKEN}

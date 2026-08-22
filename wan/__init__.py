@@ -85,6 +85,8 @@ def patch(
     otlp_protocol: str = OTLP_PROTOCOL,  # noqa: F405
     otlp_insecure: bool = OTLP_INSECURE,  # noqa: F405
     otlp_headers: Optional[str] = OTLP_HEADERS,  # noqa: F405
+    otlp_username: Optional[str] = OTLP_USERNAME,  # noqa: F405
+    otlp_password: Optional[str] = OTLP_PASSWORD,  # noqa: F405
     otlp_timeout: Optional[int] = OTLP_TIMEOUT,  # noqa: F405
     span_export_delay_ms: int = SPAN_EXPORT_DELAY_MS,  # noqa: F405
     console_span_exporter: bool = ENABLE_CONSOLE_SPAN_EXPORTER,  # noqa: F405
@@ -121,6 +123,10 @@ def patch(
     grafana_url: Optional[str] = GRAFANA_URL,  # noqa: F405
     grafana_loki_selector: str = GRAFANA_LOKI_SELECTOR,  # noqa: F405
     grafana_dashboard_uid: str = GRAFANA_DASHBOARD_UID,  # noqa: F405
+    grafana_trace_datasource_uid: str = GRAFANA_TRACE_DATASOURCE_UID,  # noqa: F405
+    grafana_trace_datasource_type: str = GRAFANA_TRACE_DATASOURCE_TYPE,  # noqa: F405
+    grafana_logs_datasource_uid: str = GRAFANA_LOGS_DATASOURCE_UID,  # noqa: F405
+    grafana_logs_datasource_type: str = GRAFANA_LOGS_DATASOURCE_TYPE,  # noqa: F405
     enable_httpx_instrumentation: bool = ENABLE_HTTPX_INSTRUMENTATION,  # noqa: F405
     enable_requests_instrumentation: bool = ENABLE_REQUESTS_INSTRUMENTATION,  # noqa: F405
 ) -> Dict[str, Any]:
@@ -134,9 +140,11 @@ def patch(
     app: fastapi.FastAPI
     service_name: str (env SERVICE_NAME, default 'fastapi')
         Reported as `service.name` on every span, and as `service` on every log line.
-    otlp_endpoint: Optional[str] (env OTLP_ENDPOINT)
-        Tempo's OTLP endpoint, e.g. 'http://localhost:4317'. Without it, trace ids
-        are still generated and logged but no spans leave the process.
+    otlp_endpoint: Optional[str] (env OTLP_ENDPOINT, alias OTLP_URL)
+        Where spans are pushed: Tempo, e.g. 'http://localhost:4317', or a remote
+        collector's HTTP ingest, e.g. 'https://host/insert/opentelemetry/v1/traces'.
+        Without it, trace ids are still generated and logged but no spans leave
+        the process.
     jaeger_host / jaeger_port: Optional[str] / Optional[int] (env JAEGER_HOST, JAEGER_PORT)
         Deprecated. The Jaeger thrift exporter was deprecated upstream in
         OpenTelemetry 1.16; Tempo ingests OTLP directly. Requires the `jaeger` extra.
@@ -149,7 +157,11 @@ def patch(
     enable_scalar_doc: bool (env ENABLE_SCALAR_DOC, default True)
         Serve a Scalar API reference at `scalar_doc_endpoint`.
     otlp_protocol: str (env OTLP_PROTOCOL, default 'grpc')
-        'grpc' for port 4317, 'http' for port 4318.
+        'grpc' for port 4317, 'http' for port 4318 or an https push URL. Defaults
+        to 'http' on its own when the endpoint already ends in '/v1/traces'.
+    otlp_username / otlp_password: Optional[str] (env OTLP_USERNAME, OTLP_PASSWORD)
+        Basic auth for a collector that requires it, sent as an Authorization
+        header. `otlp_headers` overrides it if it sets Authorization itself.
     trace_exclude_urls: Optional[str] (env TRACE_EXCLUDE_URLS)
         Comma separated regexes that must not produce spans; health and metrics
         endpoints are excluded by default so they do not swamp Tempo.
@@ -158,6 +170,13 @@ def patch(
     log_file: Optional[str] (env LOG_FILE)
         Additionally write JSON logs to this rotating file, for agents that tail
         files rather than container stdout.
+    grafana_url: Optional[str] (env GRAFANA_URL, or read off GRAFANA_DATASOURCE_URL)
+        Puts clickable log/trace links on every Sentry event. The address a human
+        browses Grafana on, never an in-cluster one.
+    grafana_trace_datasource_uid / _type: str (env GRAFANA_TRACE_DATASOURCE_UID, _TYPE)
+        Which datasource those trace links open, default Tempo's. A Jaeger-API
+        backend such as VictoriaTraces is queried differently, so the type matters;
+        pasting an Explore link into GRAFANA_DATASOURCE_URL fills in both.
 
     Returns
     -------
@@ -217,6 +236,8 @@ def patch(
         otlp_protocol=otlp_protocol,
         otlp_insecure=otlp_insecure,
         otlp_headers=otlp_headers,
+        otlp_username=otlp_username,
+        otlp_password=otlp_password,
         otlp_timeout=otlp_timeout,
         jaeger_host=jaeger_host,
         jaeger_port=jaeger_port,
@@ -252,6 +273,14 @@ def patch(
             grafana_url=grafana_url,
             loki_selector=grafana_loki_selector,
             dashboard_uid=grafana_dashboard_uid,
+            logs_datasource={
+                'type': grafana_logs_datasource_type,
+                'uid': grafana_logs_datasource_uid,
+            },
+            trace_datasource={
+                'type': grafana_trace_datasource_type,
+                'uid': grafana_trace_datasource_uid,
+            },
             ignore_loggers=(REQUEST_LOGGER_NAME,),
             tracer_provider=tracer_provider,
         )

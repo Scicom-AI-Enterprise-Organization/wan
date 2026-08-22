@@ -123,6 +123,9 @@ loki.process "json" {
 
 loki.write "default" {
   endpoint {
-    url = "http://loki:3100/loki/api/v1/push"
+    // The only place a Loki URL exists. The application never talks to Loki; it just
+    // writes JSON to stdout and Alloy ships it. Override with LOKI_URL to point at a
+    // remote Loki (Grafana Cloud, a shared cluster) instead of the local one.
+    url = coalesce(sys.env("LOKI_URL"), "http://loki:3100/loki/api/v1/push")
   }
 }

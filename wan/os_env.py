@@ -7,6 +7,8 @@ local docker-compose, staging and production without a code change.
 import os
 from typing import List, Optional
 
+from wan.grafana import parse_explore_url
+
 _TRUTHY = {'1', 'true', 't', 'yes', 'y', 'on'}
 
 
@@ -61,13 +63,41 @@ SERVICE_VERSION = env_str('SERVICE_VERSION')
 DEPLOYMENT_ENVIRONMENT = env_str('DEPLOYMENT_ENVIRONMENT')
 
 # --- tracing --------------------------------------------------------------------------
-OTLP_ENDPOINT = env_str('OTLP_ENDPOINT')
+# OTLP_URL is an accepted alias: hosted collectors (Grafana Cloud, VictoriaTraces)
+# call it that in their docs, so a .env copied from there works unchanged.
+# OTLP_ENDPOINT wins when both are set.
+OTLP_ENDPOINT = env_str('OTLP_ENDPOINT') or env_str('OTLP_URL')
+
+
+def _default_otlp_protocol(endpoint: Optional[str]) -> str:
+    """A URL carrying the OTLP signal path can only be HTTP.
+
+    Push endpoints are handed out as a full https URL ending in /v1/traces, while
+    a gRPC one is a bare host:4317. Guessing from that saves every remote deploy
+    from having to remember OTLP_PROTOCOL -- and from the silent failure of the
+    gRPC exporter dialling an HTTPS ingest.
+    """
+    if endpoint and endpoint.rstrip('/').endswith('/v1/traces'):
+        return 'http'
+    return 'grpc'
+
+
 # 'grpc' -> :4317, 'http' -> :4318. Also accepts OpenTelemetry's own spelling
 # 'http/protobuf' so OTEL_EXPORTER_OTLP_PROTOCOL can be reused verbatim.
-OTLP_PROTOCOL = (env_str('OTLP_PROTOCOL', 'grpc') or 'grpc').lower()
-OTLP_INSECURE = env_bool('OTLP_INSECURE', True)
+OTLP_PROTOCOL = (
+    env_str('OTLP_PROTOCOL', _default_otlp_protocol(OTLP_ENDPOINT)) or 'grpc'
+).lower()
+# gRPC only. Plaintext for the usual in-cluster collector, TLS once the endpoint
+# says https, so a remote push is not downgraded by the local-stack default.
+OTLP_INSECURE = env_bool(
+    'OTLP_INSECURE', not (OTLP_ENDPOINT or '').startswith('https://'),
+)
 # 'key1=value1,key2=value2', e.g. Grafana Cloud's Authorization header.
 OTLP_HEADERS = env_str('OTLP_HEADERS')
+# HTTP basic auth, the way most hosted OTLP ingests authenticate a push. Encoded
+# into an Authorization header; an explicit one in OTLP_HEADERS takes precedence.
+OTLP_USERNAME = env_str('OTLP_USERNAME')
+OTLP_PASSWORD = env_str('OTLP_PASSWORD')
 OTLP_TIMEOUT = env_int('OTLP_TIMEOUT', 10)
 
 JAEGER_HOST = env_str('JAEGER_HOST')
@@ -128,12 +158,32 @@ SENTRY_SEND_DEFAULT_PII = env_bool('SENTRY_SEND_DEFAULT_PII', False)
 SENTRY_EVENT_LEVEL = (env_str('SENTRY_EVENT_LEVEL', 'ERROR') or 'ERROR').upper()
 SENTRY_BREADCRUMB_LEVEL = (env_str('SENTRY_BREADCRUMB_LEVEL', 'INFO') or 'INFO').upper()
 
-# Set this and every Sentry event gains clickable Loki/Tempo links. Must be the URL a
-# human reaches Grafana on, not an in-cluster address like http://grafana:3000.
-GRAFANA_URL = env_str('GRAFANA_URL')
+# Paste any link copied from that Grafana's Explore, with the trace datasource
+# selected, and both the base URL and the datasource to link to are read off it.
+# The uid and type below override it individually.
+GRAFANA_DATASOURCE_URL = env_str('GRAFANA_DATASOURCE_URL')
+_explore_url, _explore_datasource = parse_explore_url(GRAFANA_DATASOURCE_URL)
+_explore_datasource = _explore_datasource or {}
+
+# Set either of these and every Sentry event gains clickable log/trace links. Must be
+# the URL a human reaches Grafana on, not an in-cluster address like http://grafana:3000.
+GRAFANA_URL = env_str('GRAFANA_URL') or _explore_url
 # Stream selector the generated LogQL starts from.
 GRAFANA_LOKI_SELECTOR = env_str('GRAFANA_LOKI_SELECTOR', '{job="fastapi"}')
+# Empty drops the dashboard link, for a Grafana that does not host this dashboard.
 GRAFANA_DASHBOARD_UID = env_str('GRAFANA_DASHBOARD_UID', 'wan')
+
+# Which datasources those links open. The defaults are the local stack's. A remote
+# Grafana names them differently -- and a Jaeger-API backend (VictoriaTraces, Jaeger)
+# is queried differently from Tempo, so the type matters as much as the uid.
+GRAFANA_TRACE_DATASOURCE_UID = (
+    env_str('GRAFANA_TRACE_DATASOURCE_UID') or _explore_datasource.get('uid') or 'tempo'
+)
+GRAFANA_TRACE_DATASOURCE_TYPE = (
+    env_str('GRAFANA_TRACE_DATASOURCE_TYPE') or _explore_datasource.get('type') or 'tempo'
+)
+GRAFANA_LOGS_DATASOURCE_UID = env_str('GRAFANA_LOGS_DATASOURCE_UID', 'loki')
+GRAFANA_LOGS_DATASOURCE_TYPE = env_str('GRAFANA_LOGS_DATASOURCE_TYPE', 'loki')
 
 # --- extras ---------------------------------------------------------------------------
 ENABLE_PROMETHEUS_METRICS = env_bool('ENABLE_PROMETHEUS_METRICS', True)

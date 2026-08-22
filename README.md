@@ -27,22 +27,23 @@ by environment variable, so the same image runs unchanged from laptop to product
    trace id, so a log line can be traced back to the request that produced it:
 
 ```json
-{"written_at": "2023-10-01T15:16:27.952Z", "written_ts": 1696173387952311000, "msg": "I sleep for 0.23938469734819534 seconds", "type": "log", "logger": "root", "thread": "MainThread", "level": "INFO", "module": "app", "line_no": 23, "correlation_id": "7e2b2e38-606d-11ee-80fc-6905893e1fcd", "traceID": "2a8642fab4a4c6e22224ca24e8815670", "trace_message": "traceID=2a8642fab4a4c6e22224ca24e8815670", "dd.trace_id": "2460313556319557232"}
+{"written_at": "2026-08-22T03:46:51.437Z", "written_ts": 1787370411437106000, "msg": "I sleep for 0.2068091112098681 seconds", "type": "log", "logger": "root", "thread": "MainThread", "level": "INFO", "module": "app", "line_no": 67, "correlation_id": "ebfcb160-2ea9-400e-b794-93729cbd6a3e", "traceID": "6aea6a078cee9a0962e1e9767fdfd85e", "trace_message": "traceID=6aea6a078cee9a0962e1e9767fdfd85e", "dd.trace_id": "7125232780637624414", "spanID": "81df20514186ce3f", "service": "fastapi"}
 ```
 
 2. Every HTTP request produces a `type=request` line with the same trace id:
 
 ```json
-{"written_at": "2023-10-01T15:16:28.192Z", "written_ts": 1696173388192492000, "type": "request", "correlation_id": "7e2b2e38-606d-11ee-80fc-6905893e1fcd", "remote_user": "-", "request": "/random", "referer": "http://localhost:7072/docs", "x_forwarded_for": "-", "protocol": "HTTP/1.1", "method": "GET", "remote_ip": "127.0.0.1", "request_size_b": -1, "remote_host": "127.0.0.1", "remote_port": 59378, "request_received_at": "2023-10-01T15:16:27.951Z", "response_time_ms": 240, "response_status": 200, "response_size_b": "51", "response_content_type": "application/json", "response_sent_at": "2023-10-01T15:16:28.192Z", "traceID": "2a8642fab4a4c6e22224ca24e8815670", "trace_message": "traceID=2a8642fab4a4c6e22224ca24e8815670", "dd.trace_id": "2460313556319557232"}
+{"written_at": "2026-08-22T03:46:51.646Z", "written_ts": 1787370411646326000, "type": "request", "correlation_id": "ebfcb160-2ea9-400e-b794-93729cbd6a3e", "remote_user": "-", "request": "/random", "referer": "http://localhost:7072/docs", "x_forwarded_for": "-", "protocol": "HTTP/1.1", "method": "GET", "remote_ip": "127.0.0.1", "request_size_b": -1, "remote_host": "127.0.0.1", "remote_port": 58468, "request_received_at": "2026-08-22T03:46:51.436Z", "response_time_ms": 209, "response_status": 200, "response_size_b": "50", "response_content_type": "application/json", "response_sent_at": "2026-08-22T03:46:51.646Z", "traceID": "6aea6a078cee9a0962e1e9767fdfd85e", "trace_message": "traceID=6aea6a078cee9a0962e1e9767fdfd85e", "dd.trace_id": "7125232780637624414", "spanID": "81df20514186ce3f", "service": "fastapi", "level": "INFO", "request_route": "/random"}
 ```
 
 3. `trace_message` carries the `traceID=` form Loki's derived fields match on, so
    Grafana can link Loki straight to Tempo — and Tempo straight back to Loki.
 
-Both shapes above are the exact schema `json_logging` produced, so existing Loki
-queries, dashboards and alerts keep working. Additional fields are appended after
-them: `spanID`, `service`, `service_version`, `environment`, `level` (on request lines
-too) and `request_route`.
+In both shapes the keys up to and including `dd.trace_id` are the exact schema, in the
+exact order, that `json_logging` produced, so existing Loki queries, dashboards and
+alerts keep working. Everything after it is appended, never inserted: `spanID`,
+`service`, `service_version`, `environment`, `level` (on request lines too) and
+`request_route`.
 
 ## Installation
 
@@ -97,7 +98,7 @@ wan.patch(app=app)
 |---|---|
 | JSON logs | trace id, span id and correlation id on every line |
 | Request logs | one `type=request` line per request, with timing and status |
-| Tracing | OpenTelemetry spans exported to Tempo over OTLP |
+| Tracing | OpenTelemetry spans exported to Tempo, or any OTLP collector, over gRPC or HTTP |
 | Metrics | Prometheus at `/metrics` |
 | Health | `/healthz`, `/livez`, `/readyz`, excluded from traces and request logs |
 | Errors | Sentry, tagged with the same trace and correlation ids |
@@ -135,16 +136,23 @@ uvicorn app:app --reload --host 0.0.0.0 --port 7072
 | `SERVICE_NAME` | `fastapi` | `service.name` on spans, `service` on logs |
 | `SERVICE_VERSION` | – | `service.version` on spans |
 | `DEPLOYMENT_ENVIRONMENT` | – | `deployment.environment` on spans |
-| `OTLP_ENDPOINT` | – | Tempo OTLP endpoint. Unset: trace ids are still logged, nothing is exported |
-| `OTLP_PROTOCOL` | `grpc` | `grpc` (port 4317) or `http` (port 4318) |
-| `OTLP_HEADERS` | – | `key=value,key=value`, e.g. Grafana Cloud auth |
-| `OTLP_INSECURE` | `true` | Skip TLS for the gRPC exporter |
+| `OTLP_ENDPOINT` | – | Where spans are pushed; `OTLP_URL` is accepted as an alias. Unset: trace ids are still logged, nothing is exported |
+| `OTLP_PROTOCOL` | auto | `grpc` (port 4317) or `http` (port 4318, or an https push URL). Defaults to `http` when the endpoint ends in `/v1/traces`, else `grpc` |
+| `OTLP_USERNAME` | – | Basic auth username for the collector |
+| `OTLP_PASSWORD` | – | Basic auth password for the collector |
+| `OTLP_HEADERS` | – | `key=value,key=value`, e.g. a bearer token. Overrides the basic auth header |
+| `OTLP_INSECURE` | auto | Skip TLS for the gRPC exporter. `false` once the endpoint is `https://` |
+| `GRAFANA_DATASOURCE_URL` | – | A link copied from Grafana Explore; the base URL and trace datasource are read off it |
+| `GRAFANA_TRACE_DATASOURCE_UID` | `tempo` | Datasource the trace links open |
+| `GRAFANA_TRACE_DATASOURCE_TYPE` | `tempo` | `tempo`, or `jaeger` for VictoriaTraces/Jaeger — they are queried differently |
+| `GRAFANA_LOGS_DATASOURCE_UID` | `loki` | Datasource the log links open |
+| `GRAFANA_LOGS_DATASOURCE_TYPE` | `loki` | Type of that datasource |
 | `TRACING_SAMPLE` | `1.0` | Head sampling ratio in (0, 1], via a ParentBased sampler |
 | `SPAN_EXPORT_DELAY_MS` | `2000` | Batch export interval |
 | `ENABLE_CONSOLE_SPAN_EXPORTER` | `false` | Print spans to stdout, for debugging without a backend |
 | `TRACE_EXCLUDE_URLS` | `healthz,livez,readyz,metrics,favicon.ico` | Regexes that must not create spans |
 | `LOGLEVEL` | `INFO` | Root log level |
-| `LOG_STDOUT` | `true` | Write JSON logs to stdout |
+| `LOG_STDOUT` | `true` | Write JSON logs to stdout. This is how logs reach Loki — see below |
 | `LOG_FILE` | – | Also write to this rotating file, for file-tailing agents |
 | `LOG_MAX_MSG_LENGTH` | `0` | Truncate `msg` above this length (0 = never) |
 | `ENABLE_REQUEST_LOG` | `true` | Emit `type=request` lines |
@@ -408,6 +416,37 @@ is the key to its own span data. This path is wired up but not covered by the te
 which mocks the Sentry ingest endpoint rather than using a real project — verify it
 against your own Sentry before relying on it.
 
+### Reading Sentry inside Grafana
+
+The stack provisions a Sentry datasource (uid `sentry`) and a dashboard panel of
+unresolved issues, so an issue can be read next to the logs and traces of the same
+request. It is the only datasource here that is not self-contained — Sentry lives
+outside the stack — so it stays inert until three variables are set:
+
+```bash
+# grafana/.env -- tracked, so non-secret values only
+SENTRY_GRAFANA_URL=https://sentry.io      # self-hosted on this machine:
+                                          #   http://host.docker.internal:9090
+SENTRY_ORG_SLUG=your-org
+```
+
+```bash
+# the token is secret, and grafana/.env is tracked -- export it instead
+export SENTRY_AUTH_TOKEN=...
+make restart-grafana
+```
+
+The auth token is **not** the DSN. A DSN's key only authorises *writing* events;
+reading them back needs a Sentry auth token (User settings → Auth Tokens, or an
+organisation token) with `project:read` and `event:read`.
+
+`http://localhost:9090` will not work: inside the Grafana container `localhost` is
+Grafana. Use `host.docker.internal`, which the compose file maps to the host gateway so
+it resolves on Linux too.
+
+The `grafana-sentry-datasource` plugin is installed by `GF_INSTALL_PLUGINS` at container
+start, so that one service needs outbound internet on its first run.
+
 ### Correlation id vs trace id
 
 They answer different questions and both are on every line:
@@ -419,6 +458,107 @@ They answer different questions and both are on every line:
 
 A trace id only exists while tracing is on and is dropped by sampling; a correlation id
 is always present and is safe to show a user or put in a support ticket.
+
+## Pushing to a remote backend
+
+### Traces: OTLP/HTTP with basic auth
+
+Nothing about the library assumes Tempo. Any OTLP ingest works — Grafana Cloud,
+VictoriaTraces, an OpenTelemetry Collector behind a reverse proxy — and most of them
+authenticate the push with HTTP basic auth:
+
+```bash
+OTLP_ENDPOINT=https://collector.example.com/insert/opentelemetry/v1/traces
+OTLP_USERNAME=...
+OTLP_PASSWORD=...
+```
+
+That is the whole configuration. Two things are inferred from the endpoint so a remote
+deploy cannot fail silently on them:
+
+- an endpoint ending in `/v1/traces` selects **OTLP/HTTP**, because only the HTTP
+  exporter takes a signal path — the gRPC exporter would dial an HTTPS ingest and drop
+  every batch. Set `OTLP_PROTOCOL` explicitly to override;
+- an `https://` endpoint turns **`OTLP_INSECURE` off**, so a remote push is not
+  downgraded by the plaintext default that suits an in-cluster collector.
+
+The endpoint may also be given as the collector root (`https://host/insert/opentelemetry`)
+and `/v1/traces` is appended. `OTLP_USERNAME` / `OTLP_PASSWORD` are encoded into an
+`Authorization: Basic` header; if `OTLP_HEADERS` sets `Authorization` itself — a bearer
+token, say — that wins, and the credentials are never logged.
+
+Run the example app against it. It reads a `.env` next to `app.py` (via the `example`
+extra's `python-dotenv`), so the credentials stay out of your shell history:
+
+```bash
+cat > .env <<'EOF'
+OTLP_ENDPOINT=https://collector.example.com/insert/opentelemetry/v1/traces
+OTLP_USERNAME=...
+OTLP_PASSWORD=...
+EOF
+
+uvicorn app:app --port 7072
+curl 'http://localhost:7072/nested'
+```
+
+The root `.env` is gitignored. The library itself never reads a file — it only reads the
+environment — so in production these come from your secret store as normal variables.
+
+For the docker stack, put the same three in `grafana/.env`; compose passes them through
+and they override the local Tempo default:
+
+```bash
+echo 'OTLP_ENDPOINT=https://collector.example.com/insert/opentelemetry/v1/traces' >> grafana/.env
+make restart
+```
+
+### Deep links into a remote Grafana
+
+The links Sentry events carry default to the local stack: a Tempo datasource with uid
+`tempo`, a Loki one with uid `loki`. A shared Grafana names them differently, and a
+Jaeger-API backend — VictoriaTraces, or Jaeger itself — is *queried* differently from
+Tempo: it looks a trace up by id with no `queryType`, where Tempo wants
+`queryType: traceql`. Send Tempo's query model to it and the pane comes up empty.
+
+Rather than make you look those up, open Explore on that Grafana, pick the trace
+datasource, and paste the URL out of the address bar:
+
+```bash
+GRAFANA_DATASOURCE_URL='https://grafana.example.com/explore?schemaVersion=1&panes=...'
+```
+
+The base URL, the datasource uid and its type all come off that one link.
+`GRAFANA_URL`, `GRAFANA_TRACE_DATASOURCE_UID` and `GRAFANA_TRACE_DATASOURCE_TYPE`
+override it piecemeal if you would rather be explicit:
+
+```bash
+GRAFANA_URL=https://grafana.example.com
+GRAFANA_TRACE_DATASOURCE_UID=victoria-traces
+GRAFANA_TRACE_DATASOURCE_TYPE=jaeger
+GRAFANA_LOGS_DATASOURCE_UID=victoria-logs-loki
+GRAFANA_DASHBOARD_UID=            # empty: that Grafana does not host this dashboard
+```
+
+### Verifying the push landed
+
+The exporter is quiet on success and logs `Failed to export` on failure, so check the
+app's own logs first. Then read the trace back out of the backend. Through Grafana,
+with a service-account token, the datasource proxy needs no direct network route to the
+collector:
+
+```bash
+TRACE_ID=$(curl -sD- -o /dev/null http://localhost:7072/nested \
+  | awk 'tolower($1) == "x-trace-id:" {print $2}' | tr -d '\r')
+
+# Jaeger-API backends (VictoriaTraces, Jaeger). Tempo: /api/traces/$TRACE_ID
+curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+  "$GRAFANA_URL/api/datasources/proxy/uid/$DATASOURCE_UID/api/traces/$TRACE_ID"
+```
+
+Allow a few seconds: every backend indexes asynchronously, so a lookup fired
+immediately after the request can 404 on a trace that is on its way in. Failing that,
+`ENABLE_CONSOLE_SPAN_EXPORTER=true` prints every span to stdout, which separates "the
+app is not producing spans" from "the collector is not accepting them".
 
 ## Example
 
@@ -631,6 +771,74 @@ Unit tests:
 ```bash
 pip install -e '.[dev]'
 pytest
+```
+
+## How logs reach Loki (there is no LOKI_URL on the app)
+
+The four signals do not all work the same way, which is the most common source of
+confusion. Two are **pushed by the application**, two are **collected from outside it**:
+
+| Signal | Backend | How it gets there | App config |
+|---|---|---|---|
+| Traces | Tempo (or any OTLP ingest) | app pushes OTLP | `OTLP_ENDPOINT=http://tempo:4317` |
+| Errors | Sentry | app pushes HTTPS | `SENTRY_DSN=https://...` |
+| **Logs** | **Loki** | **Alloy reads the app's stdout and pushes** | **none — just write to stdout** |
+| Metrics | Prometheus | Prometheus scrapes `/metrics` | none — just expose the endpoint |
+
+So there is deliberately **no `LOKI_URL` on the application**. Its entire responsibility
+for logging is to write one JSON object per line to stdout, which `LOG_STDOUT=true` (the
+default) already does. Alloy tails the container and pushes to Loki:
+
+```
+app (stdout, JSON)  ──▶  Alloy  ──▶  Loki
+```
+
+That indirection is deliberate. Writing to stdout cannot block a request, cannot fail
+because Loki is down, and survives the process crashing — Alloy buffers and retries on
+its own. An in-process Loki handler couples request latency to your log backend.
+
+### Pointing at a different Loki
+
+The URL lives in `grafana/alloy.alloy`, and is overridable:
+
+```bash
+LOKI_URL=http://loki.internal:3100/loki/api/v1/push \
+  docker compose -f grafana/docker-compose.yaml up -d alloy
+```
+
+For Grafana Cloud, which needs auth, add a `basic_auth` block to the same endpoint:
+
+```alloy
+loki.write "default" {
+  endpoint {
+    url = coalesce(sys.env("LOKI_URL"), "http://loki:3100/loki/api/v1/push")
+    basic_auth {
+      username = sys.env("LOKI_USERNAME")   // your numeric Grafana Cloud user id
+      password = sys.env("LOKI_PASSWORD")   // an access policy token
+    }
+  }
+}
+```
+
+### If Alloy is not an option
+
+When you cannot run an agent — some PaaS hosts give you no sidecar and no log drain —
+the fallback is to have the app write to a file and tail it, which this stack already
+supports via `grafana/logs/*.log`:
+
+```bash
+LOG_FILE=grafana/logs/app.log uvicorn app:app --port 7072
+```
+
+Only as a last resort, push from inside the process with a Loki logging handler
+(`python-logging-loki` and similar). Use `wan`'s formatter so the JSON schema stays the
+same, and be aware you are accepting the coupling described above:
+
+```python
+import logging, logging_loki
+handler = logging_loki.LokiHandler(url='http://loki:3100/loki/api/v1/push', version='1')
+handler.setFormatter(wan.patch(app=app)['formatter'])
+logging.getLogger().addHandler(handler)
 ```
 
 ## How the stack fits together

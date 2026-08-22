@@ -216,6 +216,48 @@ def test_event_carries_clickable_grafana_links(make_app):
         server.server_close()
 
 
+def test_links_open_the_configured_datasources(make_app):
+    """patch() -> Sentry event: a remote Grafana's own datasources, queried its way."""
+    captured = _Captured()
+    server = HTTPServer(('127.0.0.1', 0), _handler_for(captured))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    sentry_module.reset()
+    app, _ = make_app(
+        sentry_dsn=f'http://k@127.0.0.1:{server.server_address[1]}/1',
+        grafana_url='https://grafana.example.com',
+        grafana_trace_datasource_uid='victoria-traces',
+        grafana_trace_datasource_type='jaeger',
+        grafana_logs_datasource_uid='victoria-logs-loki',
+        grafana_logs_datasource_type='loki',
+    )
+
+    @app.get('/remote-fail')
+    async def remote_fail():
+        raise ValueError('boom')
+
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            client.get('/remote-fail', headers={'X-Correlation-ID': CID})
+        sentry_sdk.flush(timeout=10)
+
+        import json as _json
+        import urllib.parse as _url
+        links = captured.events()[0]['contexts']['grafana']
+        panes = _json.loads(
+            _url.parse_qs(_url.urlparse(links['logs_and_trace']).query)['panes'][0])
+        assert panes['lg']['queries'][0]['datasource'] == {
+            'type': 'loki', 'uid': 'victoria-logs-loki'}
+        assert panes['tr']['queries'][0]['datasource'] == {
+            'type': 'jaeger', 'uid': 'victoria-traces'}
+        # A jaeger datasource has no queryType; Tempo's traceql would empty the pane.
+        assert 'queryType' not in panes['tr']['queries'][0]
+    finally:
+        sentry_sdk.flush(timeout=5)
+        sentry_sdk.init(dsn=None)
+        sentry_module.reset()
+        server.shutdown()
+
+
 def test_no_grafana_context_without_a_url(sentry_app):
     """GRAFANA_URL unset: no half-built links pointing at nothing."""
     app, captured, _ = sentry_app

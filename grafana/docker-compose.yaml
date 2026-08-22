@@ -21,8 +21,14 @@ services:
       SERVICE_NAME: ${SERVICE_NAME:-wan}
       SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
       DEPLOYMENT_ENVIRONMENT: local
-      OTLP_ENDPOINT: http://tempo:4317
-      OTLP_PROTOCOL: grpc
+      # Defaults to the Tempo in this stack. Set OTLP_ENDPOINT in grafana/.env to a
+      # remote collector's HTTP ingest instead -- an endpoint ending in /v1/traces
+      # selects OTLP/HTTP on its own, so OTLP_PROTOCOL only needs setting to force it.
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-http://tempo:4317}
+      OTLP_PROTOCOL: ${OTLP_PROTOCOL:-}
+      # Basic auth for that remote collector; empty when pushing to the local Tempo.
+      OTLP_USERNAME: ${OTLP_USERNAME:-}
+      OTLP_PASSWORD: ${OTLP_PASSWORD:-}
       TRACING_SAMPLE: "1.0"
       LOGLEVEL: INFO
       ENABLE_HTTPX_INSTRUMENTATION: "true"
@@ -134,6 +140,9 @@ services:
       - --server.http.listen-addr=0.0.0.0:12345
       - --storage.path=/var/lib/alloy/data
       - /etc/alloy/config.alloy
+    environment:
+      # Read by alloy.alloy; empty falls back to the local loki service.
+      LOKI_URL: ${LOKI_URL:-}
     volumes:
       - ./alloy.alloy:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -180,6 +189,18 @@ services:
       GF_FEATURE_TOGGLES_ENABLE: traceqlEditor traceQLStreaming metricsSummary
       GF_USERS_DEFAULT_THEME: dark
       GF_LOG_LEVEL: warn
+      # Downloaded on first start, so this one service needs outbound internet.
+      GF_INSTALL_PLUGINS: grafana-sentry-datasource
+      # Read by provisioning/datasources/datasources.yaml. Empty leaves the Sentry
+      # datasource provisioned but unauthenticated, which is the local-stack default:
+      # Sentry is hosted elsewhere, so it cannot be part of a self-contained stack.
+      SENTRY_GRAFANA_URL: ${SENTRY_GRAFANA_URL:-https://sentry.io}
+      SENTRY_ORG_SLUG: ${SENTRY_ORG_SLUG:-}
+      SENTRY_AUTH_TOKEN: ${SENTRY_AUTH_TOKEN:-}
+    extra_hosts:
+      # So SENTRY_GRAFANA_URL can be host.docker.internal to reach a Sentry running
+      # on this machine. Docker Desktop resolves it already; Linux needs this line.
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana

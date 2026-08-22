@@ -1,29 +1,62 @@
 {
   "uid": "wan",
-  "title": "wan · logs, traces and metrics",
+  "title": "wan \u00b7 logs, traces and metrics",
   "description": "Logs, traces and metrics for a FastAPI service patched with wan. Click the 'View trace' link on any log line to jump to Tempo.",
-  "tags": ["fastapi", "loki", "tempo", "opentelemetry"],
+  "tags": [
+    "fastapi",
+    "loki",
+    "tempo",
+    "opentelemetry"
+  ],
   "timezone": "browser",
   "editable": true,
   "schemaVersion": 39,
   "version": 1,
   "refresh": "10s",
-  "time": { "from": "now-30m", "to": "now" },
-  "annotations": { "list": [] },
-  "templating": { "list": [] },
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "annotations": {
+    "list": []
+  },
+  "templating": {
+    "list": []
+  },
   "panels": [
     {
       "id": 1,
       "type": "stat",
       "title": "Request rate",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
       "fieldConfig": {
-        "defaults": { "unit": "reqps", "decimals": 2, "color": { "mode": "fixed", "fixedColor": "blue" } },
+        "defaults": {
+          "unit": "reqps",
+          "decimals": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
         "overrides": []
       },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "graphMode": "area",
         "colorMode": "value",
         "textMode": "auto"
@@ -41,8 +74,16 @@
       "id": 2,
       "type": "stat",
       "title": "5xx ratio",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit",
@@ -52,16 +93,31 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 0.01 },
-              { "color": "red", "value": 0.05 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.01
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
             ]
           }
         },
         "overrides": []
       },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "graphMode": "area",
         "colorMode": "value",
         "textMode": "auto"
@@ -79,14 +135,35 @@
       "id": 3,
       "type": "stat",
       "title": "p95 latency",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
       "fieldConfig": {
-        "defaults": { "unit": "s", "decimals": 3, "color": { "mode": "fixed", "fixedColor": "purple" } },
+        "defaults": {
+          "unit": "s",
+          "decimals": 3,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          }
+        },
         "overrides": []
       },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "graphMode": "area",
         "colorMode": "value",
         "textMode": "auto"
@@ -104,14 +181,35 @@
       "id": 4,
       "type": "stat",
       "title": "Log lines / s",
-      "datasource": { "type": "loki", "uid": "loki" },
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
       "fieldConfig": {
-        "defaults": { "unit": "logs/s", "decimals": 2, "color": { "mode": "fixed", "fixedColor": "green" } },
+        "defaults": {
+          "unit": "logs/s",
+          "decimals": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
         "overrides": []
       },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "graphMode": "area",
         "colorMode": "value",
         "textMode": "auto"
@@ -126,23 +224,48 @@
         }
       ]
     },
-
     {
       "id": 10,
       "type": "timeseries",
       "title": "Requests by route and status",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
-          "custom": { "fillOpacity": 20, "lineWidth": 1, "showPoints": "never", "stacking": { "mode": "normal" } }
+          "custom": {
+            "fillOpacity": 20,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal"
+            }
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"], "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -157,18 +280,37 @@
       "id": 11,
       "type": "timeseries",
       "title": "Latency quantiles",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "custom": { "fillOpacity": 5, "lineWidth": 2, "showPoints": "never" }
+          "custom": {
+            "fillOpacity": 5,
+            "lineWidth": 2,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -191,24 +333,48 @@
         }
       ]
     },
-
     {
       "id": 20,
       "type": "timeseries",
       "title": "Span rate by name (Tempo metrics generator)",
       "description": "Generated by Tempo from spans and remote-written to Prometheus. Proves the trace pipeline is live independently of the app's own /metrics.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
-          "custom": { "fillOpacity": 15, "lineWidth": 1, "showPoints": "never", "stacking": { "mode": "normal" } }
+          "custom": {
+            "fillOpacity": 15,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal"
+            }
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean"], "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -224,10 +390,24 @@
       "type": "table",
       "title": "Recent traces",
       "description": "TraceQL search against Tempo. Click a Trace ID to open the flame graph.",
-      "datasource": { "type": "tempo", "uid": "tempo" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
-      "fieldConfig": { "defaults": {}, "overrides": [] },
-      "options": { "cellHeight": "sm", "showHeader": true },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
       "targets": [
         {
           "refId": "A",
@@ -238,13 +418,20 @@
         }
       ]
     },
-
     {
       "id": 30,
       "type": "logs",
-      "title": "Application logs — every line carries traceID (click 'View trace')",
-      "datasource": { "type": "loki", "uid": "loki" },
-      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 20 },
+      "title": "Application logs \u2014 every line carries traceID (click 'View trace')",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
       "options": {
         "showTime": true,
         "showLabels": false,
@@ -268,8 +455,16 @@
       "id": 31,
       "type": "logs",
       "title": "Warnings and errors only",
-      "datasource": { "type": "loki", "uid": "loki" },
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 31 },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
       "options": {
         "showTime": true,
         "showLabels": false,
@@ -286,6 +481,41 @@
           "queryType": "range",
           "editorMode": "code",
           "expr": "{job=\"fastapi\", level=~\"WARNING|ERROR|CRITICAL\"}"
+        }
+      ]
+    },
+    {
+      "id": 40,
+      "type": "table",
+      "title": "Sentry issues \u2014 same service, same trace ids",
+      "description": "Unresolved issues from Sentry. Empty until SENTRY_ORG_SLUG and SENTRY_AUTH_TOKEN are set in grafana/.env: Sentry is hosted outside this stack. Every event carries the traceID tag, so an issue here searches back to its trace and its logs.",
+      "datasource": {
+        "type": "grafana-sentry-datasource",
+        "uid": "sentry"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "issues",
+          "issuesQuery": "is:unresolved",
+          "issuesSort": "date",
+          "issuesLimit": 25,
+          "projectIds": [],
+          "environments": []
         }
       ]
     }

@@ -1,6 +1,6 @@
 COMPOSE := docker compose -f grafana/docker-compose.yaml
 
-.PHONY: help install test up down restart logs e2e traffic clean
+.PHONY: help install test up down restart restart-grafana logs e2e traffic clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -21,6 +21,9 @@ up: ## build and start the full stack
 
 down: ## stop the stack and delete its volumes
 	$(COMPOSE) down -v
+
+restart-grafana: ## restart only Grafana, to pick up provisioning or SENTRY_AUTH_TOKEN
+	$(COMPOSE) up -d --force-recreate grafana
 
 restart: ## rebuild and restart only the app
 	$(COMPOSE) up -d --build app

@@ -1,5 +1,6 @@
 """OpenTelemetry tracer provider setup for Tempo (OTLP) and, optionally, Jaeger."""
 
+import base64
 import logging
 from typing import Dict, Optional
 
@@ -31,6 +32,93 @@ def parse_headers(raw: Optional[str]) -> Optional[Dict[str, str]]:
         key, _, value = pair.partition('=')
         headers[key.strip()] = value.strip()
     return headers or None
+
+
+def basic_auth_headers(
+    username: Optional[str] = None,
+    password: Optional[str] = None,
+) -> Dict[str, str]:
+    """``Authorization: Basic ...`` for a collector sitting behind basic auth.
+
+    Grafana Cloud, VictoriaTraces and most reverse-proxied collectors authenticate
+    a push this way. OpenTelemetry has no username/password knob of its own -- it
+    only takes headers -- so the credentials are encoded here.
+    """
+    if not username and not password:
+        return {}
+    token = base64.b64encode(f'{username or ""}:{password or ""}'.encode()).decode()
+    return {'Authorization': f'Basic {token}'}
+
+
+def build_headers(
+    raw: Optional[str] = None,
+    username: Optional[str] = None,
+    password: Optional[str] = None,
+) -> Optional[Dict[str, str]]:
+    """Merge basic-auth credentials with the free-form ``otlp_headers`` string."""
+    headers = basic_auth_headers(username, password)
+    # Explicit headers win: `otlp_headers` is the more specific knob, so an
+    # Authorization set there (a bearer token, say) is not silently overwritten.
+    headers.update(parse_headers(raw) or {})
+    return headers or None
+
+
+def http_traces_endpoint(endpoint: str) -> str:
+    """The HTTP exporter wants the full signal path, unlike gRPC.
+
+    Accepts either the collector root ('https://host/insert/opentelemetry') or the
+    complete path, so a URL copied from a vendor's docs works unchanged.
+    """
+    endpoint = endpoint.rstrip('/')
+    if endpoint.endswith('/v1/traces'):
+        return endpoint
+    return endpoint + '/v1/traces'
+
+
+def build_otlp_exporter(
+    endpoint: str,
+    protocol: str = 'grpc',
+    insecure: bool = True,
+    headers: Optional[str] = None,
+    timeout: Optional[int] = 10,
+    username: Optional[str] = None,
+    password: Optional[str] = None,
+):
+    """One OTLP span exporter, over HTTP/protobuf or gRPC."""
+    protocol = (protocol or 'grpc').lower()
+    resolved = build_headers(headers, username, password)
+
+    if protocol in HTTP_PROTOCOLS:
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+            OTLPSpanExporter as HTTPSpanExporter,
+        )
+        endpoint = http_traces_endpoint(endpoint)
+        exporter = HTTPSpanExporter(
+            endpoint=endpoint,
+            headers=resolved,
+            timeout=timeout,
+        )
+        # Never log `resolved`: it carries the credentials.
+        logger.info(f'enabled OTLP/HTTP span exporter at {endpoint}')
+        return exporter
+
+    if protocol in GRPC_PROTOCOLS:
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+            OTLPSpanExporter as GRPCSpanExporter,
+        )
+        exporter = GRPCSpanExporter(
+            endpoint=endpoint,
+            insecure=insecure,
+            headers=resolved,
+            timeout=timeout,
+        )
+        logger.info(f'enabled OTLP/gRPC span exporter at {endpoint}')
+        return exporter
+
+    raise ValueError(
+        f'unknown otlp_protocol {protocol!r}, expected one of '
+        f'{GRPC_PROTOCOLS + HTTP_PROTOCOLS}'
+    )
 
 
 def build_resource(
@@ -70,6 +158,8 @@ def setup_tracing(
     otlp_protocol: str = 'grpc',
     otlp_insecure: bool = True,
     otlp_headers: Optional[str] = None,
+    otlp_username: Optional[str] = None,
+    otlp_password: Optional[str] = None,
     otlp_timeout: Optional[int] = 10,
     jaeger_host: Optional[str] = None,
     jaeger_port: Optional[int] = 6831,
@@ -99,37 +189,15 @@ def setup_tracing(
     exporters = []
 
     if otlp_endpoint:
-        protocol = (otlp_protocol or 'grpc').lower()
-        if protocol in HTTP_PROTOCOLS:
-            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-                OTLPSpanExporter as HTTPSpanExporter,
-            )
-            endpoint = otlp_endpoint
-            # The HTTP exporter wants the full signal path, unlike gRPC.
-            if not endpoint.rstrip('/').endswith('/v1/traces'):
-                endpoint = endpoint.rstrip('/') + '/v1/traces'
-            exporters.append(HTTPSpanExporter(
-                endpoint=endpoint,
-                headers=parse_headers(otlp_headers),
-                timeout=otlp_timeout,
-            ))
-            logger.info(f'enabled OTLP/HTTP span exporter at {endpoint}')
-        elif protocol in GRPC_PROTOCOLS:
-            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
-                OTLPSpanExporter as GRPCSpanExporter,
-            )
-            exporters.append(GRPCSpanExporter(
-                endpoint=otlp_endpoint,
-                insecure=otlp_insecure,
-                headers=parse_headers(otlp_headers),
-                timeout=otlp_timeout,
-            ))
-            logger.info(f'enabled OTLP/gRPC span exporter at {otlp_endpoint}')
-        else:
-            raise ValueError(
-                f'unknown otlp_protocol {otlp_protocol!r}, expected one of '
-                f'{GRPC_PROTOCOLS + HTTP_PROTOCOLS}'
-            )
+        exporters.append(build_otlp_exporter(
+            endpoint=otlp_endpoint,
+            protocol=otlp_protocol,
+            insecure=otlp_insecure,
+            headers=otlp_headers,
+            timeout=otlp_timeout,
+            username=otlp_username,
+            password=otlp_password,
+        ))
 
     if jaeger_host:
         try:
