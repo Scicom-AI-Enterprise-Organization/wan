@@ -106,6 +106,12 @@ def build_otlp_exporter(
         from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
             OTLPSpanExporter as GRPCSpanExporter,
         )
+        # gRPC metadata keys must be lowercase. A capitalised one is rejected by the
+        # channel, not the collector, so every batch dies with 'Invalid metadata' and
+        # no request ever reaches the far end. HTTP header names are case insensitive,
+        # so lowering them there changes nothing.
+        if resolved:
+            resolved = {key.lower(): value for key, value in resolved.items()}
         exporter = GRPCSpanExporter(
             endpoint=endpoint,
             insecure=insecure,

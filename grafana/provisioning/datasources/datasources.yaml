@@ -61,6 +61,33 @@ datasources:
         spanEndTimeShift: "10m"
       streamingEnabled:
         search: true
+    # Trace id -> the Sentry issues carrying it. Select a span's traceID in Explore
+    # and this runs a Sentry query beside the trace.
+    #
+    # `wan` tags every Sentry event with `traceID`, so `traceID:<id>` is an exact
+    # search -- verified against the Sentry API, where the bare id and `trace:<id>`
+    # both return nothing.
+    #
+    # Provisioning only supports query correlations: `type: external` panics Grafana
+    # 11.6 on startup, and a non-default `config.type` is refused outright. An
+    # external link to Sentry's own UI is a derived field on Loki instead, below.
+    correlations:
+      - targetUID: sentry
+        label: Sentry issues
+        description: Errors Sentry recorded for this trace
+        config:
+          # Must be spelled out: an absent config.type is the Go zero value, which
+          # Grafana rejects as "non default value in config.type" and then refuses to
+          # start. `query` is the only value provisioning accepts.
+          type: query
+          field: traceID
+          target:
+            queryType: issues
+            issuesQuery: "traceID:$${traceID}"
+            issuesSort: date
+            issuesLimit: 25
+            projectIds: []
+            environments: []
 
   - name: Prometheus
     type: prometheus

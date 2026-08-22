@@ -108,6 +108,18 @@ def test_otel_spelling_of_the_http_protocol_is_accepted():
     assert exporter._endpoint == 'http://tempo:4318/v1/traces'
 
 
+def test_grpc_metadata_keys_are_lowercased():
+    """gRPC rejects a capitalised metadata key in the channel, before the request is
+    sent: every batch fails with 'Invalid metadata' and nothing reaches the collector."""
+    exporter = build_otlp_exporter(
+        'localhost:4317', protocol='grpc', username='user', password='pass',
+        headers='X-Scope-OrgID=tenant',
+    )
+    keys = [key for key, _ in exporter._headers]
+    assert keys == [key.lower() for key in keys], keys
+    assert ('authorization', expected_basic('user', 'pass')) in exporter._headers
+
+
 def test_unknown_protocol_fails_loudly():
     with pytest.raises(ValueError, match='unknown otlp_protocol'):
         build_otlp_exporter('http://tempo:4318', protocol='thrift')

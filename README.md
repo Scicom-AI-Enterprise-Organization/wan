@@ -425,10 +425,14 @@ outside the stack — so it stays inert until three variables are set:
 
 ```bash
 # grafana/.env -- tracked, so non-secret values only
-SENTRY_GRAFANA_URL=https://sentry.io      # self-hosted on this machine:
-                                          #   http://host.docker.internal:9090
+SENTRY_GRAFANA_URL=https://sentry.io   # what the Grafana *container* dials
+SENTRY_PUBLIC_URL=https://sentry.io    # what a *browser* opens
 SENTRY_ORG_SLUG=your-org
 ```
+
+Those two are the same address on sentry.io and different ones for a self-hosted
+Sentry on this machine: `http://host.docker.internal:9090` for the container,
+`http://localhost:9090` for the browser.
 
 ```bash
 # the token is secret, and grafana/.env is tracked -- export it instead
@@ -446,6 +450,55 @@ it resolves on Linux too.
 
 The `grafana-sentry-datasource` plugin is installed by `GF_INSTALL_PLUGINS` at container
 start, so that one service needs outbound internet on its first run.
+
+#### From a trace to its Sentry issues
+
+The Tempo datasource carries a provisioned correlation on `traceID`: select that field
+on a span in Explore and Grafana runs `traceID:<id>` against Sentry beside the trace.
+Every event `wan` sends is tagged with `traceID`, so the match is exact — the bare id
+and `trace:<id>` both return nothing.
+
+Each row includes Sentry's own `Permalink`, which is the link to follow. A URL built by
+hand is a guess: a self-hosted Sentry does not necessarily use sentry.io's
+`/organizations/<org>/issues/` layout, and every path on one answers `303` to an
+unauthenticated request, so a wrong guess cannot be told from a right one.
+
+Two things about provisioning correlations are worth knowing before editing them, both
+found the hard way:
+
+- only `query` correlations can be provisioned. `type: external` **panics Grafana 11.6
+  on startup** (`interface conversion` in `makeCreateCorrelationCommand`) — the HTTP API
+  accepts it, provisioning does not;
+- `config.type: query` must be spelled out. Omitted, it is the Go zero value, which
+  Grafana rejects as *"correlation contains non default value in config.type"* and then
+  refuses to start.
+
+Both failures take Grafana down rather than skipping the correlation, so change that
+block with a container restart in hand.
+
+#### Searching Sentry by trace id
+
+In Explore with the Sentry datasource: **Query Type** `Issues`, **Query**
+`traceID:<id>`. Leave Project and Environment empty.
+
+```
+traceID:b6d6a9904b549230cb96f5cdc0833d86
+```
+
+The tag qualifier is not optional. A bare trace id matches nothing, and neither does
+`trace:<id>` — `traceID` is the tag `wan` puts on every event, and it is case
+sensitive. Two other things read as "it is broken" when it is not:
+
+- **the time range applies.** Explore defaults to the last hour; an older trace needs
+  the range widened before its issue appears;
+- **`Count` is the issue's total, not this trace's.** Sentry groups by fingerprint, so
+  one issue covers every occurrence. The search answers "which issue contains this
+  trace", which is the useful question — it is not a count of failures for that one
+  request.
+
+The datasource offers Issues, Events, Events Stats, Stats, Spans, Spans Stats and
+Metrics. Which of those answer depends on the Sentry behind it: issues, events, event
+time series and outcome stats are the four a dashboard usually draws.
 
 ### Correlation id vs trace id
 

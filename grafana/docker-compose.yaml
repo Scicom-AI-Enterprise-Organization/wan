@@ -188,13 +188,14 @@ services:
       GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:${GRAFANA_PORT:-3000}/}
       GF_FEATURE_TOGGLES_ENABLE: traceqlEditor traceQLStreaming metricsSummary
       GF_USERS_DEFAULT_THEME: dark
-      GF_LOG_LEVEL: warn
+      GF_LOG_LEVEL: ${GF_LOG_LEVEL:-warn}
       # Downloaded on first start, so this one service needs outbound internet.
       GF_INSTALL_PLUGINS: grafana-sentry-datasource
       # Read by provisioning/datasources/datasources.yaml. Empty leaves the Sentry
       # datasource provisioned but unauthenticated, which is the local-stack default:
       # Sentry is hosted elsewhere, so it cannot be part of a self-contained stack.
       SENTRY_GRAFANA_URL: ${SENTRY_GRAFANA_URL:-https://sentry.io}
+      SENTRY_PUBLIC_URL: ${SENTRY_PUBLIC_URL:-https://sentry.io}
       SENTRY_ORG_SLUG: ${SENTRY_ORG_SLUG:-}
       SENTRY_AUTH_TOKEN: ${SENTRY_AUTH_TOKEN:-}
     extra_hosts:

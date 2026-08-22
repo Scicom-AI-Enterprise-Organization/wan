@@ -75,6 +75,12 @@ Credentials become an `Authorization: Basic` header. `OTLP_HEADERS`
 (`key=value,key=value`) is merged over them, so an explicit bearer token wins. Never log
 the resolved header dict — `build_otlp_exporter()` logs only the endpoint.
 
+**Header keys are lowercased on the gRPC path.** gRPC metadata keys must be lowercase;
+a capitalised one is rejected by the channel, not the collector, so every batch dies
+with `Invalid metadata` and no request ever reaches the far end. HTTP header names are
+case insensitive, which is why this hides until someone points a credentialled exporter
+at a gRPC endpoint.
+
 The relevant seams in `wan/tracing.py`: `build_otlp_exporter()` returns one configured
 exporter, `build_headers()` merges credentials with `OTLP_HEADERS`, and
 `http_traces_endpoint()` normalises the path. Test them directly; `setup_tracing()`
@@ -135,6 +141,30 @@ The issues panel (id 40 in `wan.json`) uses the plugin's query model, whose shap
 easy to get wrong: `issuesQuery` is a plain **string**, alongside sibling keys
 `issuesSort` / `issuesLimit` — not a nested object. Confirm against the plugin's own
 `applyTemplateVariables` before changing it.
+
+Two addresses for the same Sentry, deliberately: `SENTRY_GRAFANA_URL` is what the
+container dials, `SENTRY_PUBLIC_URL` what a browser opens. On a self-hosted Sentry they
+differ (`host.docker.internal` vs `localhost`).
+
+The Tempo datasource carries a provisioned correlation on `traceID` that queries Sentry
+for `traceID:<id>` — exact, because every event `wan` sends is tagged with it. Editing
+that block is unusually hazardous: **both mistakes take Grafana down at startup**, they
+do not skip the correlation.
+
+- `type: external` panics 11.6 in `makeCreateCorrelationCommand`. Only `query`
+  correlations can be provisioned; the HTTP API accepts `external`, provisioning does not.
+- `config.type: query` must be explicit. Omitted, the Go zero value trips
+  *"correlation contains non default value in config.type"* and the server exits.
+
+Link to Sentry via the `Permalink` field the API returns, never a hand-built URL: a
+self-hosted install need not use sentry.io's `/organizations/<org>/issues/` layout, and
+every path answers `303` unauthenticated, so a wrong guess looks identical to a right one.
+
+Searching Sentry for a trace is `traceID:<id>` — tag-qualified and case sensitive. A
+bare id and `trace:<id>` both return nothing, so a wrong guess here also looks like an
+empty result rather than an error. `Count` on a result row is the issue's lifetime
+total, not that trace's: Sentry groups by fingerprint, so the query answers "which issue
+contains this trace".
 
 ## Conventions
 

@@ -488,7 +488,7 @@
       "id": 40,
       "type": "table",
       "title": "Sentry issues \u2014 same service, same trace ids",
-      "description": "Unresolved issues from Sentry. Empty until SENTRY_ORG_SLUG and SENTRY_AUTH_TOKEN are set in grafana/.env: Sentry is hosted outside this stack. Every event carries the traceID tag, so an issue here searches back to its trace and its logs.",
+      "description": "Unresolved issues from Sentry. Empty until SENTRY_ORG_SLUG and SENTRY_AUTH_TOKEN are set (see grafana/.env): Sentry is hosted outside this stack. Every event is tagged with traceID, so selecting a span traceID in Explore opens the matching issues here via the Tempo -> Sentry correlation.",
       "datasource": {
         "type": "grafana-sentry-datasource",
         "uid": "sentry"
@@ -501,7 +501,26 @@
       },
       "fieldConfig": {
         "defaults": {},
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Permalink"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open in Sentry",
+                    "url": "${__value.raw}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "cellHeight": "sm",
@@ -516,6 +535,26 @@
           "issuesLimit": 25,
           "projectIds": [],
           "environments": []
+        }
+      ],
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "ShortID",
+                "Title",
+                "Level",
+                "Status",
+                "Count",
+                "UserCount",
+                "LastSeen",
+                "Culprit",
+                "Permalink"
+              ]
+            }
+          }
         }
       ]
     }
