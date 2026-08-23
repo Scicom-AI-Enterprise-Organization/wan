@@ -47,14 +47,8 @@ alerts keep working. Everything after it is appended, never inserted: `spanID`,
 
 ## Installation
 
-Installed straight from git; this is not published to PyPI.
-
-```bash
-pip3 install git+https://github.com/Scicom-AI-Enterprise-Organization/wan
-```
-
-Pin a tag or commit for anything you deploy — a bare git URL tracks the default branch,
-so a colleague's merge changes what your next build installs:
+Installed straight from git; this is not published to PyPI. Install a release tag —
+that is the pinned, reproducible form to deploy:
 
 ```bash
 pip3 install 'wan @ git+https://github.com/Scicom-AI-Enterprise-Organization/wan@v0.2.0'
@@ -66,11 +60,26 @@ In a `requirements.txt`:
 wan @ git+https://github.com/Scicom-AI-Enterprise-Organization/wan@v0.2.0
 ```
 
-Optional extras use PEP 508 direct-reference syntax, since there is no package index to
-resolve `wan[extra]` against:
+Releases are listed on the repo's [tags page](https://github.com/Scicom-AI-Enterprise-Organization/wan/tags),
+or from the shell:
 
 ```bash
-pip3 install 'wan[httpx] @ git+https://github.com/Scicom-AI-Enterprise-Organization/wan'
+git ls-remote --tags https://github.com/Scicom-AI-Enterprise-Organization/wan
+```
+
+Anything after the `@` that git can resolve works — a tag, a branch, or a commit sha.
+Dropping the `@v...` entirely installs the default branch: fine on a laptop, but in a
+deploy it means a colleague's merge changes what your next build installs.
+
+```bash
+pip3 install git+https://github.com/Scicom-AI-Enterprise-Organization/wan   # tracks main
+```
+
+Optional extras use PEP 508 direct-reference syntax, since there is no package index to
+resolve `wan[extra]` against — the tag rides along:
+
+```bash
+pip3 install 'wan[httpx] @ git+https://github.com/Scicom-AI-Enterprise-Organization/wan@v0.2.0'
 ```
 
 | Extra | Adds |
