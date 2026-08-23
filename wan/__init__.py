@@ -10,10 +10,11 @@ Prometheus metrics, health probes and a Scalar API reference::
     wan.patch(app=app)
 """
 
-__version__ = '0.1.0'
+__version__ = '0.2.0'
 
+import inspect
 import logging
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from fastapi import Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -103,9 +104,11 @@ def patch(
     log_exclude_urls: Iterable[str] = LOG_EXCLUDE_URLS,  # noqa: F405
     correlation_id_headers: Iterable[str] = CORRELATION_ID_HEADERS,  # noqa: F405
     correlation_id_header: str = CORRELATION_ID_HEADER,  # noqa: F405
+    correlation_id_max_length: int = CORRELATION_ID_MAX_LENGTH,  # noqa: F405
     enable_correlation_id_propagation: bool = ENABLE_CORRELATION_ID_PROPAGATION,  # noqa: F405
     metrics_endpoint: str = METRICS_ENDPOINT,  # noqa: F405
     enable_health_endpoints: bool = ENABLE_HEALTH_ENDPOINTS,  # noqa: F405
+    readiness_checks: Optional[Iterable[Callable]] = None,
     scalar_title: Optional[str] = SCALAR_TITLE,  # noqa: F405
     scalar_theme: str = SCALAR_THEME,  # noqa: F405
     scalar_dark_mode: bool = SCALAR_DARK_MODE,  # noqa: F405
@@ -167,6 +170,14 @@ def patch(
         endpoints are excluded by default so they do not swamp Tempo.
     log_exclude_urls: Iterable[str] (env LOG_EXCLUDE_URLS)
         Path prefixes that must not produce a `type=request` log line.
+    correlation_id_max_length: int (env CORRELATION_ID_MAX_LENGTH, default 128)
+        Inbound correlation ids are truncated to this; they are attacker-controlled
+        and land on every log line. 0 disables the cap.
+    readiness_checks: Optional[Iterable[Callable]] (no env: these are callables)
+        Run by `/readyz`; sync or async. A check fails by raising or returning False,
+        and any failure turns `/readyz` into a 503 naming the failed check -- without
+        this the endpoint answers 200 unconditionally, which is liveness, not
+        readiness. Keep them cheap: Kubernetes polls every few seconds.
     log_file: Optional[str] (env LOG_FILE)
         Additionally write JSON logs to this rotating file, for agents that tail
         files rather than container stdout.
@@ -208,6 +219,9 @@ def patch(
         capture_warnings=capture_warnings,
     )
 
+    for message in _multiworker_warnings(enable_prometheus_metrics, log_file):
+        logger.warning(message)
+
     # Added before the OpenTelemetry middleware on purpose. Starlette treats the
     # most recently added middleware as the outermost one, so instrumenting after
     # this leaves the span context active while the request line is written --
@@ -217,6 +231,7 @@ def patch(
         exclude_urls=log_exclude_urls,
         correlation_id_headers=correlation_id_headers,
         correlation_id_response_header=correlation_id_header,
+        correlation_id_max_length=correlation_id_max_length,
         log_requests=enable_request_log,
         # No-op until setup_sentry() runs below; it checks its own enabled flag.
         on_request_start=sentry_module.bind_request_scope,
@@ -306,7 +321,7 @@ def patch(
         )
 
     if enable_health_endpoints:
-        _add_health_endpoints(app, service_name, service_version)
+        _add_health_endpoints(app, service_name, service_version, readiness_checks)
 
     if enable_scalar_doc:
         _add_scalar_endpoint(
@@ -358,8 +373,46 @@ def _instrument_optional(module_path: str, class_name: str, tracer_provider, ext
     logger.info(f'enabled {class_name}')
 
 
-def _add_health_endpoints(app, service_name: str, service_version: Optional[str]) -> None:
+def _multiworker_warnings(
+    prometheus_enabled: bool,
+    log_file: Optional[str],
+    workers: int = WEB_CONCURRENCY,  # noqa: F405
+    multiproc_dir: Optional[str] = PROMETHEUS_MULTIPROC_DIR,  # noqa: F405
+) -> List[str]:
+    """What silently breaks when uvicorn/gunicorn run more than one worker.
+
+    Warnings rather than errors, because both setups still *run* -- they just lie.
+    Detection is best effort: WEB_CONCURRENCY is the one worker-count signal both
+    servers share, and an explicit --workers flag leaves no trace in the environment.
+    """
+    if workers <= 1:
+        return []
+    warnings = []
+    if prometheus_enabled and not multiproc_dir:
+        warnings.append(
+            f'{workers} workers each keep their own Prometheus registry, so every '
+            '/metrics scrape returns a single worker\'s counters -- undercounting '
+            f'by ~{workers}x with no error anywhere. Set PROMETHEUS_MULTIPROC_DIR '
+            'to a writable directory that is emptied on container start.'
+        )
+    if log_file:
+        warnings.append(
+            f'LOG_FILE with {workers} workers: RotatingFileHandler is not safe '
+            'across processes -- rotation races corrupt or clobber the file. '
+            'Log to stdout and let the collector ship it, or give each worker '
+            'its own file.'
+        )
+    return warnings
+
+
+def _add_health_endpoints(
+    app,
+    service_name: str,
+    service_version: Optional[str],
+    readiness_checks: Optional[Iterable[Callable]] = None,
+) -> None:
     payload = {'status': 'ok', 'service': service_name, 'version': service_version}
+    checks = tuple(readiness_checks or ())
 
     # Excluded from tracing and from request logs by default: these are polled
     # every few seconds and are pure noise in both Tempo and Loki.
@@ -373,7 +426,35 @@ def _add_health_endpoints(app, service_name: str, service_version: Optional[str]
 
     @app.get('/readyz', include_in_schema=False, response_class=JSONResponse, tags=['observability'])
     async def readyz():
-        return payload
+        """503 when any readiness check fails; 200 with per-check detail otherwise.
+
+        A failing check is reported, never raised: a probe endpoint that 500s looks
+        like the app crashed, when the truth is a dependency is down.
+        """
+        results: Dict[str, str] = {}
+        ready = True
+        for check in checks:
+            name = getattr(check, '__name__', None) or type(check).__name__
+            try:
+                outcome = check()
+                if inspect.isawaitable(outcome):
+                    outcome = await outcome
+                if outcome is False:
+                    ready = False
+                    results[name] = 'failed'
+                else:
+                    results[name] = 'ok'
+            except Exception as e:
+                ready = False
+                results[name] = f'{type(e).__name__}: {e}'
+        body = dict(payload, checks=results)
+        if ready:
+            return JSONResponse(body)
+        body['status'] = 'unready'
+        # One warning per failed poll is the right volume: it timestamps exactly
+        # when readiness was lost and regained in the same stream as everything else.
+        logger.warning(f'readiness checks failed: {results}')
+        return JSONResponse(body, status_code=503)
 
 
 def _add_scalar_endpoint(

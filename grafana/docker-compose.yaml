@@ -19,7 +19,7 @@ services:
       logs.job: fastapi
     environment:
       SERVICE_NAME: ${SERVICE_NAME:-wan}
-      SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+      SERVICE_VERSION: ${SERVICE_VERSION:-0.2.0}
       DEPLOYMENT_ENVIRONMENT: local
       # Defaults to the Tempo in this stack. Set OTLP_ENDPOINT in grafana/.env to a
       # remote collector's HTTP ingest instead -- an endpoint ending in /v1/traces
@@ -68,7 +68,7 @@ services:
       SENTRY_ENVIRONMENT: local
       GRAFANA_URL: ${GRAFANA_URL:-http://localhost:${GRAFANA_PORT:-3000}}
       GRAFANA_DASHBOARD_UID: wan
-      SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+      SERVICE_VERSION: ${SERVICE_VERSION:-0.2.0}
       DEPLOYMENT_ENVIRONMENT: local
       OTLP_ENDPOINT: http://tempo:4317
       LOGLEVEL: INFO
@@ -93,7 +93,7 @@ services:
       SENTRY_ENVIRONMENT: local
       GRAFANA_URL: ${GRAFANA_URL:-http://localhost:${GRAFANA_PORT:-3000}}
       GRAFANA_DASHBOARD_UID: wan
-      SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+      SERVICE_VERSION: ${SERVICE_VERSION:-0.2.0}
       DEPLOYMENT_ENVIRONMENT: local
       OTLP_ENDPOINT: http://tempo:4317
       LOGLEVEL: INFO

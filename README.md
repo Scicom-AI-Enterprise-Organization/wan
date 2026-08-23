@@ -136,11 +136,11 @@ uvicorn app:app --reload --host 0.0.0.0 --port 7072
 | `SERVICE_NAME` | `fastapi` | `service.name` on spans, `service` on logs |
 | `SERVICE_VERSION` | – | `service.version` on spans |
 | `DEPLOYMENT_ENVIRONMENT` | – | `deployment.environment` on spans |
-| `OTLP_ENDPOINT` | – | Where spans are pushed; `OTLP_URL` is accepted as an alias. Unset: trace ids are still logged, nothing is exported |
-| `OTLP_PROTOCOL` | auto | `grpc` (port 4317) or `http` (port 4318, or an https push URL). Defaults to `http` when the endpoint ends in `/v1/traces`, else `grpc` |
+| `OTLP_ENDPOINT` | – | Where spans are pushed. `OTLP_URL` and the standard `OTEL_EXPORTER_OTLP(_TRACES)_ENDPOINT` are accepted fallbacks. Unset: trace ids are still logged, nothing is exported |
+| `OTLP_PROTOCOL` | auto | `grpc` (port 4317) or `http` (port 4318, or an https push URL). `OTEL_EXPORTER_OTLP_PROTOCOL` is a fallback; defaults to `http` when the endpoint ends in `/v1/traces`, else `grpc` |
 | `OTLP_USERNAME` | – | Basic auth username for the collector |
 | `OTLP_PASSWORD` | – | Basic auth password for the collector |
-| `OTLP_HEADERS` | – | `key=value,key=value`, e.g. a bearer token. Overrides the basic auth header |
+| `OTLP_HEADERS` | – | `key=value,key=value`, e.g. a bearer token. Overrides the basic auth header; `OTEL_EXPORTER_OTLP_HEADERS` is a fallback |
 | `OTLP_INSECURE` | auto | Skip TLS for the gRPC exporter. `false` once the endpoint is `https://` |
 | `GRAFANA_DATASOURCE_URL` | – | A link copied from Grafana Explore; the base URL and trace datasource are read off it |
 | `GRAFANA_TRACE_DATASOURCE_UID` | `tempo` | Datasource the trace links open |
@@ -159,6 +159,7 @@ uvicorn app:app --reload --host 0.0.0.0 --port 7072
 | `CAPTURE_WARNINGS` | `true` | Route `warnings.warn()` through logging so it is JSON too |
 | `LOG_EXCLUDE_URLS` | `/healthz,/livez,/readyz,/metrics` | Path prefixes not to request-log |
 | `CORRELATION_ID_HEADERS` | `x-correlation-id,correlation-id,x-request-id,request-id` | Inbound headers to reuse as the correlation id |
+| `CORRELATION_ID_MAX_LENGTH` | `128` | Inbound ids are truncated to this — they are attacker-controlled and land on every log line. 0 = no cap |
 | `CORRELATION_ID_HEADER` | `X-Correlation-ID` | Header written on responses and on outbound calls |
 | `ENABLE_CORRELATION_ID_PROPAGATION` | `true` | Forward the correlation id on outbound calls |
 | `SENTRY_DSN` | – | Enables Sentry error reporting. Unset = off |
@@ -184,6 +185,35 @@ uvicorn app:app --reload --host 0.0.0.0 --port 7072
 | `ENABLE_HTTPX_INSTRUMENTATION` | `false` | Trace outbound `httpx` calls (needs the `httpx` extra) |
 | `ENABLE_REQUESTS_INSTRUMENTATION` | `false` | Trace outbound `requests` calls (needs the `requests` extra) |
 | `JAEGER_HOST` / `JAEGER_PORT` | – / `6831` | Deprecated, see below |
+
+### Readiness that checks something
+
+`/healthz` and `/livez` answer 200 unconditionally, which is correct for liveness: a
+dead database is not a reason for Kubernetes to restart the pod. `/readyz` answers 200
+unconditionally too **until you give it checks** — and readiness that checks nothing is
+just liveness with a different name, routing traffic to a pod whose dependencies are
+gone:
+
+```python
+async def database():
+    await pool.execute('select 1')
+
+def queue():
+    return broker.connected     # returning False fails the check; so does raising
+
+wan.patch(app=app, readiness_checks=[database, queue])
+```
+
+Any failure turns `/readyz` into a 503 that names the culprit, without hiding the
+other results:
+
+```json
+{"status": "unready", "service": "wan", "checks": {"database": "ConnectionError: connection refused", "queue": "ok"}}
+```
+
+Checks may be sync or async. Keep them cheap — Kubernetes polls every few seconds, and
+these endpoints are excluded from traces and request logs precisely because they run
+constantly.
 
 ### Using it from your own modules
 
@@ -943,6 +973,38 @@ Filter on `log_type="request"` if you only want the correlated copy.
 `TRACING_SAMPLE` uses a `ParentBased(TraceIdRatioBased(...))` sampler, so a trace is
 never sampled halfway: if an upstream service sampled it, this service keeps its spans
 too, and traces never come out with holes in the middle.
+
+### Multiple workers
+
+Two things silently break the moment `uvicorn --workers N` or gunicorn runs more than
+one process, and `patch()` warns about both when it can see `WEB_CONCURRENCY > 1`:
+
+- **`/metrics` undercounts by the worker count.** Each worker keeps its own Prometheus
+  registry, and a scrape returns whichever worker answered. Set
+  `PROMETHEUS_MULTIPROC_DIR` to a writable directory (emptied on container start) and
+  the instrumentator switches to the shared multiprocess registry.
+- **`LOG_FILE` corrupts on rotation.** `RotatingFileHandler` is not safe across
+  processes. Log to stdout (the default) and let the collector ship it, or give each
+  worker its own file.
+
+An explicit `--workers 4` flag leaves no trace in the environment, so the warning
+cannot fire then — prefer `WEB_CONCURRENCY=4`, which uvicorn and gunicorn both read.
+
+### If spans go missing under load
+
+`BatchSpanProcessor` drops spans past a 2048-span queue rather than blocking the
+request — deliberately, but silently apart from one SDK warning. The standard
+OpenTelemetry env vars are the pressure valve, and the SDK reads them without any help
+from this library:
+
+```bash
+OTEL_BSP_MAX_QUEUE_SIZE=8192          # default 2048
+OTEL_BSP_MAX_EXPORT_BATCH_SIZE=1024   # default 512
+OTEL_BSP_EXPORT_TIMEOUT=10000         # ms, default 30000
+```
+
+`SPAN_EXPORT_DELAY_MS` (this library's knob, default 2000) controls how often the
+queue is flushed; the `OTEL_BSP_*` family controls how big it may grow.
 
 ### Air-gapped Scalar
 

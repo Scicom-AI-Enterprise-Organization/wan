@@ -76,6 +76,7 @@ class RequestLoggingMiddleware:
         exclude_urls: Iterable[str] = (),
         correlation_id_headers: Iterable[str] = DEFAULT_CORRELATION_ID_HEADERS,
         correlation_id_response_header: str = 'X-Correlation-ID',
+        correlation_id_max_length: int = 128,
         trace_id_response_header: str = 'X-Trace-Id',
         logger_name: str = REQUEST_LOGGER_NAME,
         log_requests: bool = True,
@@ -90,6 +91,7 @@ class RequestLoggingMiddleware:
             correlation_id_response_header.lower().encode('latin-1')
             if correlation_id_response_header else None
         )
+        self.correlation_id_max_length = correlation_id_max_length
         self.trace_id_response_header = (
             trace_id_response_header.lower().encode('latin-1')
             if trace_id_response_header else None
@@ -103,10 +105,18 @@ class RequestLoggingMiddleware:
         return any(path == pattern or path.startswith(pattern) for pattern in self.exclude_urls)
 
     def correlation_id(self, headers: RawHeaders) -> str:
-        """Reuse an inbound id so one id spans every hop of a request."""
+        """Reuse an inbound id so one id spans every hop of a request.
+
+        Truncated to `correlation_id_max_length` (0 = no cap): the inbound value is
+        attacker-controlled, and uncapped it lands verbatim on every log line and
+        response header for the request. Truncation rather than rejection, so a chain
+        whose first hop minted an oversized id still correlates from this hop on.
+        """
         for name in self.correlation_id_headers:
             value = _header(headers, name)
             if value:
+                if self.correlation_id_max_length > 0:
+                    value = value[:self.correlation_id_max_length]
                 return value
         return new_correlation_id()
 

@@ -175,3 +175,37 @@ def test_patching_twice_is_a_no_op(make_app):
 
 def test_correlation_headers_helper_is_empty_outside_a_request():
     assert wan.correlation_headers() == {}
+
+
+def test_inbound_correlation_ids_are_capped(make_app):
+    """The inbound id is attacker-controlled; uncapped, a 10KB header becomes a 10KB
+    field on every log line for the request."""
+    app, capture = make_app()
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        response = test_client.get('/ping', headers={'X-Correlation-ID': 'x' * 4096})
+    returned = response.headers['x-correlation-id']
+    assert len(returned) == 128
+    logged = capture.of_type('request')[0]['correlation_id']
+    # The log line and the response header must agree, or the id stops correlating.
+    assert logged == returned
+
+
+def test_the_correlation_cap_leaves_ordinary_ids_alone(make_app):
+    app, capture = make_app()
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        response = test_client.get('/ping', headers={'X-Correlation-ID': 'req-42'})
+    assert response.headers['x-correlation-id'] == 'req-42'
+
+
+def test_multiworker_warnings_fire_only_when_state_is_per_worker():
+    from wan import _multiworker_warnings
+
+    # Single worker: nothing to say, whatever else is configured.
+    assert _multiworker_warnings(True, '/var/log/app.log', workers=1) == []
+    # Multiple workers, both hazards present.
+    warnings = _multiworker_warnings(True, '/var/log/app.log', workers=4, multiproc_dir=None)
+    assert len(warnings) == 2
+    assert 'PROMETHEUS_MULTIPROC_DIR' in warnings[0]
+    assert 'LOG_FILE' in warnings[1]
+    # The multiproc dir resolves the metrics half; stdout logging resolves the other.
+    assert _multiworker_warnings(True, None, workers=4, multiproc_dir='/tmp/metrics') == []

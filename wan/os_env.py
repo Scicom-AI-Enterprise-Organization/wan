@@ -63,10 +63,27 @@ SERVICE_VERSION = env_str('SERVICE_VERSION')
 DEPLOYMENT_ENVIRONMENT = env_str('DEPLOYMENT_ENVIRONMENT')
 
 # --- tracing --------------------------------------------------------------------------
-# OTLP_URL is an accepted alias: hosted collectors (Grafana Cloud, VictoriaTraces)
-# call it that in their docs, so a .env copied from there works unchanged.
-# OTLP_ENDPOINT wins when both are set.
-OTLP_ENDPOINT = env_str('OTLP_ENDPOINT') or env_str('OTLP_URL')
+
+
+def _otlp_endpoint_from_env() -> Optional[str]:
+    """OTLP_ENDPOINT, with three accepted fallbacks.
+
+    OTLP_URL because hosted collectors (Grafana Cloud, VictoriaTraces) call it that
+    in their docs, so a .env copied from there works unchanged. The two OTEL_* names
+    because they are the OpenTelemetry standard: a deploy already configured for
+    auto-instrumentation sets those, and ignoring them would read as "tracing is
+    configured" while nothing exports. The signal-specific name outranks the generic
+    one, same as in the SDK.
+    """
+    return (
+        env_str('OTLP_ENDPOINT')
+        or env_str('OTLP_URL')
+        or env_str('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT')
+        or env_str('OTEL_EXPORTER_OTLP_ENDPOINT')
+    )
+
+
+OTLP_ENDPOINT = _otlp_endpoint_from_env()
 
 
 def _default_otlp_protocol(endpoint: Optional[str]) -> str:
@@ -82,18 +99,21 @@ def _default_otlp_protocol(endpoint: Optional[str]) -> str:
     return 'grpc'
 
 
-# 'grpc' -> :4317, 'http' -> :4318. Also accepts OpenTelemetry's own spelling
-# 'http/protobuf' so OTEL_EXPORTER_OTLP_PROTOCOL can be reused verbatim.
+# 'grpc' -> :4317, 'http' -> :4318. The standard OTEL_EXPORTER_OTLP_PROTOCOL is a
+# fallback, and its value spelling 'http/protobuf' is accepted verbatim.
 OTLP_PROTOCOL = (
-    env_str('OTLP_PROTOCOL', _default_otlp_protocol(OTLP_ENDPOINT)) or 'grpc'
+    env_str('OTLP_PROTOCOL')
+    or env_str('OTEL_EXPORTER_OTLP_PROTOCOL')
+    or _default_otlp_protocol(OTLP_ENDPOINT)
 ).lower()
 # gRPC only. Plaintext for the usual in-cluster collector, TLS once the endpoint
 # says https, so a remote push is not downgraded by the local-stack default.
 OTLP_INSECURE = env_bool(
     'OTLP_INSECURE', not (OTLP_ENDPOINT or '').startswith('https://'),
 )
-# 'key1=value1,key2=value2', e.g. Grafana Cloud's Authorization header.
-OTLP_HEADERS = env_str('OTLP_HEADERS')
+# 'key1=value1,key2=value2', e.g. Grafana Cloud's Authorization header. The standard
+# OTEL_EXPORTER_OTLP_HEADERS uses the same syntax and is accepted as a fallback.
+OTLP_HEADERS = env_str('OTLP_HEADERS') or env_str('OTEL_EXPORTER_OTLP_HEADERS')
 # HTTP basic auth, the way most hosted OTLP ingests authenticate a push. Encoded
 # into an Authorization header; an explicit one in OTLP_HEADERS takes precedence.
 OTLP_USERNAME = env_str('OTLP_USERNAME')
@@ -138,6 +158,9 @@ CORRELATION_ID_HEADERS = env_list(
 )
 # Outbound and on responses: the single canonical header this service writes.
 CORRELATION_ID_HEADER = env_str('CORRELATION_ID_HEADER', 'X-Correlation-ID')
+# Inbound ids are attacker-controlled: without a cap, a 10KB header becomes a 10KB
+# field on every log line for that request. 0 = no cap, mirroring LOG_MAX_MSG_LENGTH.
+CORRELATION_ID_MAX_LENGTH = env_int('CORRELATION_ID_MAX_LENGTH', 128)
 # Attach it to outbound calls made by any OpenTelemetry-instrumented HTTP client.
 ENABLE_CORRELATION_ID_PROPAGATION = env_bool('ENABLE_CORRELATION_ID_PROPAGATION', True)
 
@@ -184,6 +207,13 @@ GRAFANA_TRACE_DATASOURCE_TYPE = (
 )
 GRAFANA_LOGS_DATASOURCE_UID = env_str('GRAFANA_LOGS_DATASOURCE_UID', 'loki')
 GRAFANA_LOGS_DATASOURCE_TYPE = env_str('GRAFANA_LOGS_DATASOURCE_TYPE', 'loki')
+
+# --- runtime probes (not wan knobs) -----------------------------------------------------
+# uvicorn and gunicorn both read WEB_CONCURRENCY for their worker count. Read here only
+# so patch() can warn about state that silently breaks per worker: the Prometheus
+# registry and a rotating log file.
+WEB_CONCURRENCY = env_int('WEB_CONCURRENCY', 1)
+PROMETHEUS_MULTIPROC_DIR = env_str('PROMETHEUS_MULTIPROC_DIR')
 
 # --- extras ---------------------------------------------------------------------------
 ENABLE_PROMETHEUS_METRICS = env_bool('ENABLE_PROMETHEUS_METRICS', True)

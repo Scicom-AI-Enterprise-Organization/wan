@@ -125,6 +125,30 @@ def test_unknown_protocol_fails_loudly():
         build_otlp_exporter('http://tempo:4318', protocol='thrift')
 
 
+def test_standard_otel_env_names_are_fallbacks(monkeypatch):
+    """A deploy configured for OpenTelemetry auto-instrumentation sets the OTEL_*
+    names; ignoring them reads as "tracing is configured" while nothing exports."""
+    from wan.os_env import _otlp_endpoint_from_env
+
+    for name in ('OTLP_ENDPOINT', 'OTLP_URL',
+                 'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT', 'OTEL_EXPORTER_OTLP_ENDPOINT'):
+        monkeypatch.delenv(name, raising=False)
+    assert _otlp_endpoint_from_env() is None
+
+    monkeypatch.setenv('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://generic:4318')
+    assert _otlp_endpoint_from_env() == 'http://generic:4318'
+
+    # The signal-specific name outranks the generic one, same as in the SDK.
+    monkeypatch.setenv('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT', 'http://traces:4318')
+    assert _otlp_endpoint_from_env() == 'http://traces:4318'
+
+    # And wan's own names outrank both.
+    monkeypatch.setenv('OTLP_URL', 'http://url:4318')
+    assert _otlp_endpoint_from_env() == 'http://url:4318'
+    monkeypatch.setenv('OTLP_ENDPOINT', 'http://endpoint:4318')
+    assert _otlp_endpoint_from_env() == 'http://endpoint:4318'
+
+
 class Ingest(BaseHTTPRequestHandler):
     """A stand-in for the remote collector, recording what the exporter sent."""
 

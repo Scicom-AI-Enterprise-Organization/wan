@@ -166,6 +166,30 @@ empty result rather than an error. `Count` on a result row is the issue's lifeti
 total, not that trace's: Sentry groups by fingerprint, so the query answers "which issue
 contains this trace".
 
+## Production behaviour
+
+- **Multiple workers**: `patch()` warns when `WEB_CONCURRENCY > 1` and either
+  `PROMETHEUS_MULTIPROC_DIR` is unset (per-worker registries make `/metrics`
+  undercount by the worker count) or `LOG_FILE` is set (`RotatingFileHandler` races
+  across processes). The check is `_multiworker_warnings()` — pure, tested directly.
+  An explicit `--workers` flag is invisible to it; only the env var is detectable.
+- **Readiness**: `/readyz` runs `patch(readiness_checks=[...])` (sync or async
+  callables; raising or returning False → 503 naming the check). No env var — checks
+  are callables. `/healthz` and `/livez` stay unconditional on purpose: liveness must
+  not depend on downstreams.
+- **Backpressure**: `BatchSpanProcessor` drops past a 2048-span queue. The standard
+  `OTEL_BSP_*` env vars tune it and the SDK reads them directly — don't add wan knobs
+  that shadow them. `OTEL_RESOURCE_ATTRIBUTES` also works (merged by
+  `Resource.create`), and `OTEL_EXPORTER_OTLP(_TRACES)_ENDPOINT` / `_PROTOCOL` /
+  `_HEADERS` are accepted as fallbacks behind wan's own `OTLP_*` names.
+- **Correlation ids are attacker-controlled**: inbound values are truncated to
+  `CORRELATION_ID_MAX_LENGTH` (default 128, 0 = no cap) in
+  `RequestLoggingMiddleware.correlation_id()`. Truncate, never reject — a chain whose
+  first hop minted an oversized id must still correlate from this hop on.
+- **Releases are git tags** (`vX.Y.Z`) on main, with `__version__` in
+  `wan/__init__.py` bumped in the same commit. The README tells consumers to pin the
+  tag in `wan @ git+...@vX.Y.Z` form; an untagged repo makes that instruction a lie.
+
 ## Conventions
 
 - Single quotes, 4-space indent, ~90 column lines, f-strings in log calls.
