@@ -57,13 +57,13 @@ Pin a tag or commit for anything you deploy — a bare git URL tracks the defaul
 so a colleague's merge changes what your next build installs:
 
 ```bash
-pip3 install 'wan @ git+https://github.com/Scicom-AI-Enterprise-Organization/wan@v0.1.0'
+pip3 install 'wan @ git+https://github.com/Scicom-AI-Enterprise-Organization/wan@v0.2.0'
 ```
 
 In a `requirements.txt`:
 
 ```
-wan @ git+https://github.com/Scicom-AI-Enterprise-Organization/wan@v0.1.0
+wan @ git+https://github.com/Scicom-AI-Enterprise-Organization/wan@v0.2.0
 ```
 
 Optional extras use PEP 508 direct-reference syntax, since there is no package index to
@@ -100,7 +100,7 @@ wan.patch(app=app)
 | Request logs | one `type=request` line per request, with timing and status |
 | Tracing | OpenTelemetry spans exported to Tempo, or any OTLP collector, over gRPC or HTTP |
 | Metrics | Prometheus at `/metrics` |
-| Health | `/healthz`, `/livez`, `/readyz`, excluded from traces and request logs |
+| Health | `/healthz`, `/livez`, and `/readyz` with optional readiness checks — all excluded from traces and request logs |
 | Errors | Sentry, tagged with the same trace and correlation ids |
 | API docs | Scalar at `/scalar` |
 | Headers | `X-Correlation-ID` and `X-Trace-Id` on every response |

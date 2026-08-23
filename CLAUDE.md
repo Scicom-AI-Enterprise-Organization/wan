@@ -11,6 +11,7 @@ pip install -e '.[dev]'      # or: make install
 pytest -q                    # or: make test
 make up                      # full local stack (app + Tempo/Loki/Alloy/Prometheus/Grafana)
 make e2e                     # end-to-end check against a running stack
+make restart-grafana         # apply provisioning changes (or a new SENTRY_AUTH_TOKEN)
 make down                    # tear down, deleting volumes
 ```
 
@@ -29,6 +30,7 @@ Keep new code 3.9-compatible: `Optional[str]`, not `str | None`.
 | `wan/sentry.py` | SDK init and the `before_send` that stamps ids and links |
 | `app.py` | Example service; loads a repo-root `.env` before `import wan` |
 | `grafana/` | docker-compose stack, Alloy config, provisioning |
+| `tests/` | pytest; `test_logs.py` pins the public log schema, `test_tracing.py` covers exporter wiring, `test_health.py` readiness |
 
 Two things follow from `os_env.py` reading the environment at import time:
 
