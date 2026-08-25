@@ -209,3 +209,58 @@ def test_multiworker_warnings_fire_only_when_state_is_per_worker():
     assert 'LOG_FILE' in warnings[1]
     # The multiproc dir resolves the metrics half; stdout logging resolves the other.
     assert _multiworker_warnings(True, None, workers=4, multiproc_dir='/tmp/metrics') == []
+
+
+def test_unhandled_500_carries_the_correlation_headers(make_app):
+    """The crash is the response a support ticket is about; without these headers the
+    500 is the one response that cannot be correlated to its logs and trace."""
+    app, capture = make_app()
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        response = test_client.get('/kaboom', headers={'X-Correlation-ID': 'crash-1'})
+    assert response.status_code == 500
+    # Byte-identical to Starlette's stock 500, just with the headers on it.
+    assert response.text == 'Internal Server Error'
+    assert response.headers['x-correlation-id'] == 'crash-1'
+    assert HEX32.match(response.headers['x-trace-id'])
+    # And they agree with the request log line, or the ids stop correlating.
+    entry = capture.of_type('request')[0]
+    assert entry['traceID'] == response.headers['x-trace-id']
+    assert entry['correlation_id'] == 'crash-1'
+    assert entry['response_status'] == 500
+
+
+def test_a_custom_500_handler_still_wins_over_the_stamped_response(make_app):
+    """Pre-empting ServerErrorMiddleware would silently replace an operator's error
+    page with ours; a registered handler means we stand down entirely."""
+    from fastapi.responses import JSONResponse
+
+    app, capture = make_app()
+
+    async def custom(request, exc):
+        return JSONResponse({'custom': True}, status_code=500)
+
+    app.add_exception_handler(Exception, custom)
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        response = test_client.get('/kaboom')
+    assert response.status_code == 500
+    assert response.json() == {'custom': True}
+    assert 'x-trace-id' not in response.headers
+
+
+def test_debug_mode_tracebacks_are_not_preempted(make_app):
+    app, capture = make_app()
+    app.debug = True
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        response = test_client.get('/kaboom')
+    assert response.status_code == 500
+    # Starlette's debug page, not our plain-text body.
+    assert response.text != 'Internal Server Error'
+    assert 'RuntimeError' in response.text
+
+
+def test_handled_http_exceptions_are_untouched_by_the_crash_path(make_app):
+    app, capture = make_app()
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        response = test_client.get('/nope')
+    assert response.status_code == 404
+    assert 'x-trace-id' in response.headers  # the normal path, as before

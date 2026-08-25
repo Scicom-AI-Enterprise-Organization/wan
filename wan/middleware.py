@@ -120,6 +120,24 @@ class RequestLoggingMiddleware:
                 return value
         return new_correlation_id()
 
+    def _stock_500_would_answer(self, scope) -> bool:
+        """True when Starlette's own plain-text 500 is what the client would get.
+
+        Only then may we send it ourselves (to stamp the correlation headers on it).
+        With `debug=True` or a registered 500/Exception handler, ServerErrorMiddleware
+        produces a custom body -- pre-empting it would silently replace the operator's
+        error page with ours, so those crashes keep today's behaviour: custom body,
+        no headers.
+        """
+        app = scope.get('app')
+        if app is None:
+            return True
+        if getattr(app, 'debug', False):
+            return False
+        handlers = getattr(app, 'exception_handlers', None) or {}
+        # Starlette's build_middleware_stack treats these two keys as the 500 handler.
+        return not (Exception in handlers or 500 in handlers)
+
     async def __call__(self, scope, receive, send):
         if scope['type'] != 'http':
             return await self.app(scope, receive, send)
@@ -164,7 +182,37 @@ class RequestLoggingMiddleware:
 
         try:
             await self.app(scope, receive, send_wrapper)
-        except BaseException:
+        except BaseException as exc:
+            # An unhandled exception propagates past this middleware, so the 500 that
+            # ServerErrorMiddleware sends never passes through send_wrapper -- which
+            # is why crash responses used to carry no X-Trace-Id or X-Correlation-ID,
+            # the two headers a support ticket needs most. Send the byte-identical
+            # stock response ourselves, through send_wrapper: ServerErrorMiddleware
+            # sees the response as started and skips its own.
+            #
+            # Only for a plain `Exception` -- a BaseException here is a cancellation
+            # or shutdown, where nothing should be sent -- and only when nothing has
+            # been sent yet, since a crash mid-stream cannot be turned into a 500.
+            if (
+                status is None
+                and isinstance(exc, Exception)
+                and self._stock_500_would_answer(scope)
+            ):
+                try:
+                    body = b'Internal Server Error'
+                    await send_wrapper({
+                        'type': 'http.response.start',
+                        'status': 500,
+                        'headers': [
+                            (b'content-type', b'text/plain; charset=utf-8'),
+                            (b'content-length', str(len(body)).encode('latin-1')),
+                        ],
+                    })
+                    await send_wrapper({'type': 'http.response.body', 'body': body})
+                except Exception:
+                    # The client is gone, or the transport is. The original
+                    # exception below is the one that must surface, not this one.
+                    pass
             if should_log:
                 # uvicorn logs unhandled exceptions too, but from outside the request
                 # context -- so its traceback has no traceID and no correlation_id.
@@ -172,8 +220,8 @@ class RequestLoggingMiddleware:
                 # the trace id on one searchable line.
                 self.emit(
                     scope, headers, received_at, started_monotonic,
-                    status if status is not None else 500, (), body_bytes, correlation_id,
-                    exc_info=sys.exc_info(),
+                    status if status is not None else 500, response_headers, body_bytes,
+                    correlation_id, exc_info=sys.exc_info(),
                 )
             raise
         else:

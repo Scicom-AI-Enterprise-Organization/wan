@@ -72,6 +72,18 @@ datasources:
     # 11.6 on startup, and a non-default `config.type` is refused outright. An
     # external link to Sentry's own UI is a derived field on Loki instead, below.
     correlations:
+      # The native datasource's lookup is built for this exact jump: trace id -> the
+      # events carrying it, each with an "Open in bettersentryio" link. `kind` and
+      # `trace` are the plugin's own query fields (src/types.ts).
+      - targetUID: bsio-native
+        label: bettersentryio events
+        description: The exact events carrying this trace id
+        config:
+          type: query
+          field: traceID
+          target:
+            kind: lookup
+            trace: $${traceID}
       - targetUID: sentry
         label: Sentry issues
         description: Errors Sentry recorded for this trace
@@ -122,3 +134,19 @@ datasources:
       orgSlug: ${SENTRY_ORG_SLUG}
     secureJsonData:
       authToken: ${SENTRY_AUTH_TOKEN}
+
+  # The native bettersentryio datasource: typed frames, monitors/incidents,
+  # correlation-id lookup. Same engine and same token as the sentry-compat entry
+  # above -- a new row rather than a rename, because the provisioner matches rows by
+  # name and renaming a provisioned datasource in place is a crash-loop (measured in
+  # the bettersentryio repo). Frontend-only: queries run in the browser and reach the
+  # engine through the data proxy `engine` route, which attaches the token
+  # server-side, so the browser never holds the credential.
+  - name: bettersentryio-native
+    type: scicom-bettersentryio-datasource
+    uid: bsio-native
+    access: proxy
+    jsonData:
+      url: ${SENTRY_GRAFANA_URL}
+    secureJsonData:
+      apiToken: ${SENTRY_AUTH_TOKEN}

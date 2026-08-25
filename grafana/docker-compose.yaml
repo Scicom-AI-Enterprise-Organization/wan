@@ -173,7 +173,9 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:11.6.0
+    # 12.3+ is the native bettersentryio datasource's @grafana/* dependency floor.
+    # The upgrade migrates grafana-data in place; going back to 11.x needs `down -v`.
+    image: grafana/grafana:12.3.0
     environment:
       # Local demo stack: browse dashboards and Explore without logging in.
       # Grafana 11 only supports Viewer for anonymous, hence viewers_can_edit so
@@ -191,6 +193,10 @@ services:
       GF_LOG_LEVEL: ${GF_LOG_LEVEL:-warn}
       # Downloaded on first start, so this one service needs outbound internet.
       GF_INSTALL_PLUGINS: grafana-sentry-datasource
+      # The native bettersentryio datasource is mounted from a sibling checkout, not
+      # installed from the catalog, and carries no signature -- name it or Grafana
+      # refuses to load it.
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: scicom-bettersentryio-datasource
       # Read by provisioning/datasources/datasources.yaml. Empty leaves the Sentry
       # datasource provisioned but unauthenticated, which is the local-stack default:
       # Sentry is hosted elsewhere, so it cannot be part of a self-contained stack.
@@ -204,6 +210,11 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./provisioning:/etc/grafana/provisioning:ro
+      # The native datasource, straight out of `npm run build` in
+      # bettersentryio/scicom-bettersentryio-datasource. BSIO_PLUGIN_DIR (grafana/.env)
+      # points at that checkout; the default is an empty tracked directory, so a
+      # machine without the sibling repo just runs without the plugin.
+      - ${BSIO_PLUGIN_DIR:-./plugins/bsio-native}:/var/lib/grafana/plugins/scicom-bettersentryio-datasource
       - grafana-data:/var/lib/grafana
     ports:
       - "${BIND_HOST:-0.0.0.0}:${GRAFANA_PORT:-3000}:3000"

@@ -490,10 +490,39 @@ it resolves on Linux too.
 The `grafana-sentry-datasource` plugin is installed by `GF_INSTALL_PLUGINS` at container
 start, so that one service needs outbound internet on its first run.
 
+#### The native bettersentryio datasource
+
+Alongside the official plugin, the stack provisions
+[bettersentryio](https://github.com/Scicom-AI-Enterprise-Organization/bettersentryio)'s
+own datasource (uid `bsio-native`): typed frames, monitors and incidents as first-class
+query types, lookup by correlation or trace id, and `eventDetail` — the newest matching
+event's full anatomy (stacktrace, contexts, packages) as rows inside Grafana. It is mounted from a sibling
+checkout rather than installed from the catalog — `BSIO_PLUGIN_DIR` in `grafana/.env`
+points at that repo's built `dist/`; blank it on a machine without the checkout and the
+stack runs without the plugin. Being unsigned, it must be named in
+`GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS`, and it needs Grafana ≥ 12.3 (the compose
+file pins 12.3.0 — note the 11.x → 12.x upgrade migrates the Grafana volume one way).
+
+It is frontend-only: queries run in the browser and reach the engine through Grafana's
+data proxy, which attaches the API token server-side. Two consequences:
+
+- the browser never holds the credential;
+- `/api/ds/query` cannot exercise it — that path is backend-only. Verify it in a
+  browser, or curl the proxy route, which proves the URL and the token together:
+
+```bash
+curl -u admin:admin \
+  'http://localhost:3010/api/datasources/proxy/uid/bsio-native/engine/api/0/organizations/bettersentryio/issues?statsPeriod=24h'
+```
+
 #### From a trace to its Sentry issues
 
-The Tempo datasource carries a provisioned correlation on `traceID`: select that field
-on a span in Explore and Grafana runs `traceID:<id>` against Sentry beside the trace.
+The Tempo datasource carries two provisioned correlations on `traceID` — select that
+field on a span in Explore and pick one:
+
+- **bettersentryio events** (native): the exact events carrying that trace id, each
+  with an "Open in bettersentryio" link — the plugin's `lookup` query;
+- **Sentry issues** (compat): runs `traceID:<id>` against the Sentry search API.
 Every event `wan` sends is tagged with `traceID`, so the match is exact — the bare id
 and `trace:<id>` both return nothing.
 
@@ -550,6 +579,13 @@ They answer different questions and both are on every line:
 
 A trace id only exists while tracing is on and is dropped by sampling; a correlation id
 is always present and is safe to show a user or put in a support ticket.
+
+Both headers are on **crash responses too**: an unhandled exception normally propagates
+past the middleware, so the 500 that Starlette sends carried neither id — and the crash
+is the one response a support ticket is about. The middleware now sends Starlette's
+byte-identical stock 500 itself, with the headers stamped on. It stands down when the
+response would not be the stock one: `debug=True` and custom `Exception`/500 handlers
+keep their own body (and, unavoidably, no headers).
 
 ## Pushing to a remote backend
 

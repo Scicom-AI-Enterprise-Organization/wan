@@ -144,13 +144,25 @@ easy to get wrong: `issuesQuery` is a plain **string**, alongside sibling keys
 `issuesSort` / `issuesLimit` — not a nested object. Confirm against the plugin's own
 `applyTemplateVariables` before changing it.
 
+A second Sentry-shaped datasource, `bsio-native` (`scicom-bettersentryio-datasource`),
+is bettersentryio's own plugin: mounted from the sibling checkout via `BSIO_PLUGIN_DIR`
+in `grafana/.env` (blank = run without it), allowed by
+`GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS`, floor Grafana 12.3 (image pinned 12.3.0).
+It is frontend-only, so `/api/ds/query` can NEVER exercise it — an empty result there
+is the wrong test, not a broken datasource. Verify through the data proxy instead:
+`/api/datasources/proxy/uid/bsio-native/engine/api/0/...`, which also proves the token
+attachment. It was added as a new row, never by renaming the compat entry — the
+provisioner matches rows by name, and renaming a provisioned datasource in place is a
+crash-loop.
+
 Two addresses for the same Sentry, deliberately: `SENTRY_GRAFANA_URL` is what the
 container dials, `SENTRY_PUBLIC_URL` what a browser opens. On a self-hosted Sentry they
 differ (`host.docker.internal` vs `localhost`).
 
-The Tempo datasource carries a provisioned correlation on `traceID` that queries Sentry
-for `traceID:<id>` — exact, because every event `wan` sends is tagged with it. Editing
-that block is unusually hazardous: **both mistakes take Grafana down at startup**, they
+The Tempo datasource carries two provisioned correlations on `traceID`: the native
+plugin's `lookup` query (`{kind: lookup, trace: $${traceID}}` — field names from its
+src/types.ts), and the compat search `traceID:<id>` — exact, because every event `wan`
+sends is tagged with it. Editing that block is unusually hazardous: **both mistakes take Grafana down at startup**, they
 do not skip the correlation.
 
 - `type: external` panics 11.6 in `makeCreateCorrelationCommand`. Only `query`
@@ -184,6 +196,12 @@ contains this trace".
   that shadow them. `OTEL_RESOURCE_ATTRIBUTES` also works (merged by
   `Resource.create`), and `OTEL_EXPORTER_OTLP(_TRACES)_ENDPOINT` / `_PROTOCOL` /
   `_HEADERS` are accepted as fallbacks behind wan's own `OTLP_*` names.
+- **Crash responses carry the ids**: on an unhandled `Exception` (never a bare
+  `BaseException` — that is a cancellation), `RequestLoggingMiddleware` sends
+  Starlette's byte-identical stock 500 itself so `X-Trace-Id`/`X-Correlation-ID` are
+  stamped on; `ServerErrorMiddleware` sees the response as started and skips its own.
+  It stands down for `debug=True` or a registered 500/`Exception` handler — pre-empting
+  those would replace the operator's error page.
 - **Correlation ids are attacker-controlled**: inbound values are truncated to
   `CORRELATION_ID_MAX_LENGTH` (default 128, 0 = no cap) in
   `RequestLoggingMiddleware.correlation_id()`. Truncate, never reject — a chain whose
