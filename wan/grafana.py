@@ -14,6 +14,11 @@ from typing import Any, Dict, Optional
 LOKI_DATASOURCE = {'type': 'loki', 'uid': 'loki'}
 TEMPO_DATASOURCE = {'type': 'tempo', 'uid': 'tempo'}
 
+#: VictoriaLogs read through its own Grafana plugin. Its query language is LogsQL,
+#: not LogQL, so the expression must be shaped from the datasource type the same
+#: way trace_pane() already shapes its query for a Jaeger-API backend.
+VICTORIALOGS_TYPE = 'victoriametrics-logs-datasource'
+
 DEFAULT_RANGE = {'from': 'now-1h', 'to': 'now'}
 
 
@@ -110,16 +115,44 @@ def logs_expr(
     selector: str = '{job="fastapi"}',
     correlation_id: Optional[str] = None,
     trace_id: Optional[str] = None,
+    datasource_type: Optional[str] = None,
 ) -> Optional[str]:
-    """LogQL for one request.
+    """The log filter for one request, in the dialect the datasource speaks.
 
     Prefers the correlation id: it exists even when tracing is sampled out, and it spans
-    every service the request touched.
+    every service the request touched. LogQL unless the datasource is the VictoriaLogs
+    plugin, whose LogsQL rejects LogQL's filter pipes outright (`unexpected pipe`).
     """
+    if datasource_type == VICTORIALOGS_TYPE:
+        return logsql_expr(selector, correlation_id, trace_id)
     if correlation_id:
         return f'{selector} | correlation_id="{correlation_id}"'
     if trace_id:
         return f'{selector} |= "{trace_id}"'
+    return None
+
+
+def logsql_expr(
+    selector: str = '{job="fastapi"}',
+    correlation_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+) -> Optional[str]:
+    """LogsQL for one request.
+
+    The stream-filter half of the syntax is shared with LogQL, so the selector passes
+    through unchanged; only the filter differs. Each id is matched two ways because
+    VictoriaLogs stores a line differently depending on how it was ingested: as a
+    field (`correlation_id:"..."`) when the JSON was parsed at ingest, and only as a
+    word inside ``_msg`` (`"..."`) when it was not -- the link cannot know which, and
+    an OR across both is correct in either case. The trace id additionally tries both
+    field spellings: wan's own log lines say ``traceID``, while pipelines that rename
+    to the OpenTelemetry convention say ``trace_id``.
+    """
+    if correlation_id:
+        return f'{selector} (correlation_id:"{correlation_id}" OR "{correlation_id}")'
+    if trace_id:
+        return (f'{selector} (trace_id:"{trace_id}" OR traceID:"{trace_id}"'
+                f' OR "{trace_id}")')
     return None
 
 
@@ -131,7 +164,8 @@ def logs_url(
     logs_datasource: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
     """Explore link to the log lines for one request."""
-    expr = logs_expr(selector, correlation_id, trace_id)
+    expr = logs_expr(selector, correlation_id, trace_id,
+                     (logs_datasource or {}).get('type'))
     if expr is None:
         return None
     return explore_url(base_url, {'lg': loki_pane(expr, datasource=logs_datasource)})
@@ -160,7 +194,8 @@ def logs_and_trace_url(
     """Both in one Explore view: logs on the left, flame graph on the right."""
     if not trace_id:
         return logs_url(base_url, selector, correlation_id, trace_id, logs_datasource)
-    expr = logs_expr(selector, correlation_id, trace_id)
+    expr = logs_expr(selector, correlation_id, trace_id,
+                     (logs_datasource or {}).get('type'))
     return explore_url(base_url, {
         'lg': loki_pane(expr, datasource=logs_datasource),
         'tr': trace_pane(trace_id, datasource=trace_datasource),
