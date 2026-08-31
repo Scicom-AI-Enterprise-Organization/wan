@@ -19,7 +19,11 @@ TEMPO_DATASOURCE = {'type': 'tempo', 'uid': 'tempo'}
 #: way trace_pane() already shapes its query for a Jaeger-API backend.
 VICTORIALOGS_TYPE = 'victoriametrics-logs-datasource'
 
-DEFAULT_RANGE = {'from': 'now-1h', 'to': 'now'}
+#: Wide on purpose: these links live on error events, which are routinely opened
+#: hours or days after the fact. A narrow window renders "No data" for a row that
+#: exists, and nothing on the page explains why. Every query behind these links is
+#: already filtered to one id, so the wider scan stays cheap.
+DEFAULT_RANGE = {'from': 'now-7d', 'to': 'now'}
 
 
 def parse_explore_url(url: Optional[str]):
