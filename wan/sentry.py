@@ -181,6 +181,13 @@ def setup_sentry(
     }
     if use_otel:
         options['instrumenter'] = 'otel'
+    # sentry-sdk silently prefers Brotli whenever the `brotli` package happens to be
+    # importable in the venv, and an envelope backend that only speaks
+    # identity/gzip/deflate (bettersentryio does) answers 415 -- while the SDK still
+    # hands the caller an event id, so every event is lost with no error on either
+    # side. gzip is the one compressed encoding every backend accepts; pass
+    # `_experiments` in init_kwargs to override deliberately.
+    options['_experiments'] = {'transport_compression_algo': 'gzip'}
     options.update(init_kwargs)
 
     sentry_sdk.init(**options)
