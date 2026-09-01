@@ -26,6 +26,7 @@ CID = 'SENTRY-CID-42'
 class _Captured:
     def __init__(self):
         self.envelopes = []
+        self.encodings = []
 
     def events(self):
         return [
@@ -40,6 +41,7 @@ def _handler_for(captured):
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
             body = self.rfile.read(int(self.headers.get('content-length', 0)))
+            captured.encodings.append(self.headers.get('content-encoding'))
             if self.headers.get('content-encoding') == 'gzip':
                 body = gzip.decompress(body)
             # An envelope is newline-delimited JSON: envelope header, then pairs of
@@ -111,6 +113,19 @@ def test_error_reaches_sentry_once(sentry_app):
     exception = events[0]['exception']['values'][-1]
     assert exception['type'] == 'ValueError'
     assert exception['value'] == 'card processor exploded'
+
+
+def test_envelope_transport_is_pinned_to_gzip(sentry_app):
+    """sentry-sdk picks Brotli whenever the `brotli` package is importable, and an
+    envelope backend that only speaks identity/gzip/deflate answers 415 -- while the
+    SDK still hands the caller an event id, so every event is silently lost. The
+    transport must send gzip regardless of what the venv happens to contain."""
+    app, captured, _ = sentry_app
+    with TestClient(app, raise_server_exceptions=False) as client:
+        client.get('/card-fail')
+    sentry_sdk.flush(timeout=10)
+
+    assert captured.encodings and set(captured.encodings) == {'gzip'}
 
 
 def test_event_carries_the_correlation_id_as_a_tag(sentry_app):
