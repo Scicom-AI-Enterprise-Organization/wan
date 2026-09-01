@@ -80,6 +80,35 @@ def test_logs_url_opens_the_configured_datasource():
     assert pane['queries'][0]['expr'] == '{job="fastapi"} | correlation_id="cid-1"'
 
 
+def test_a_victorialogs_backend_is_queried_in_logsql():
+    """The VictoriaLogs plugin speaks LogsQL: LogQL's `| field="v"` pipe is a parse
+    error there (`unexpected pipe`), so the filter must be `field:"v"` instead."""
+    logs = {'type': 'victoriametrics-logs-datasource', 'uid': 'victoria-logs'}
+    url = logs_url('https://grafana.example.com', correlation_id='cid-1', logs_datasource=logs)
+    pane = panes_of(url)['lg']
+    assert pane['datasource'] == 'victoria-logs'
+    assert pane['queries'][0]['expr'] == (
+        '{job="fastapi"} (correlation_id:"cid-1" OR "cid-1")'
+    )
+    assert '|' not in pane['queries'][0]['expr']
+
+
+def test_victorialogs_trace_id_matches_both_field_spellings():
+    """wan's own lines carry traceID; an OTel-renaming pipeline carries trace_id.
+    The link cannot know which shipped, so it must match either."""
+    logs = {'type': 'victoriametrics-logs-datasource', 'uid': 'victoria-logs'}
+    url = logs_url('https://grafana.example.com', trace_id='abc123', logs_datasource=logs)
+    expr = panes_of(url)['lg']['queries'][0]['expr']
+    assert 'trace_id:"abc123"' in expr
+    assert 'traceID:"abc123"' in expr
+
+
+def test_a_loki_backend_still_gets_logql():
+    url = logs_url('https://grafana.example.com', correlation_id='cid-1')
+    expr = panes_of(url)['lg']['queries'][0]['expr']
+    assert expr == '{job="fastapi"} | correlation_id="cid-1"'
+
+
 def test_links_for_carries_both_datasources_into_the_combined_pane():
     logs = {'type': 'loki', 'uid': 'victoria-logs-loki'}
     links = links_for(
